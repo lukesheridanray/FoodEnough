@@ -1,0 +1,59 @@
+# ============================================================
+# FoodEnough Project - .gitignore
+# ------------------------------------------------------------
+# Covers both the FastAPI backend and Next.js frontend
+# Ensures no secrets, databases, or build artifacts are pushed
+# ============================================================
+
+# ===== Environment & Secrets =====
+.env
+**/.env
+.env.local
+.env.development
+.env.production
+.env.test
+
+# ===== Databases & Generated Data =====
+*.db
+*.sqlite3
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ===== Python Environment =====
+.venv/
+venv/
+env/
+ENV/
+pip-wheel-metadata/
+*.egg-info/
+*.egg
+*.manifest
+*.spec
+
+# ===== Node / Next.js =====
+node_modules/
+.next/
+dist/
+build/
+out/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ===== Frontend Cache =====
+.cache/
+coverage/
+*.tsbuildinfo
+
+# ===== IDE & OS Files =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ===== Logs =====
+*.log
+*.csv
+logs/
