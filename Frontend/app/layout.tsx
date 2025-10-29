@@ -1,14 +1,21 @@
-import "../styles/globals.css";
-import { ReactNode } from "react";
-import Navbar from "../components/Navbar";
+import "./globals.css";
+import { Inter } from "next/font/google";
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+const inter = Inter({ subsets: ["latin"] });
+
+export const metadata = {
+  title: "FoodEnough",
+  description: "Track your food and workouts naturally",
+};
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en">
-      <body className="bg-gray-50 text-gray-900 font-sans">
-        <Navbar />
-        <main className="max-w-3xl mx-auto px-4 py-6">{children}</main>
-      </body>
+      <body className={inter.className}>{children}</body>
     </html>
   );
 }
