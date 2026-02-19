@@ -2,3 +2,8 @@ fastapi
 uvicorn
 openai
 python-dotenv
+sqlalchemy
+python-jose[cryptography]
+bcrypt
+email-validator
+slowapi

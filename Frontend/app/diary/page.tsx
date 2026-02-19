@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import axios from "axios";
+import { getToken, removeToken } from "../../lib/auth";
+import BottomNav from "../components/BottomNav";
 import {
   BarChart,
   Bar,
@@ -19,19 +22,6 @@ interface FoodItem {
   protein: number;
   carbs: number;
   fat: number;
-}
-
-interface Log {
-  timestamp: string;
-  parsed_json: {
-    items: FoodItem[];
-    total: {
-      calories: number;
-      protein: number;
-      carbs: number;
-      fat: number;
-    };
-  };
 }
 
 interface DailyGroup {
@@ -53,10 +43,22 @@ export default function DiaryPage() {
     carbs: 0,
     fat: 0,
   });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const router = useRouter();
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
   useEffect(() => {
+    const token = getToken();
+    if (!token) {
+      router.push("/login");
+      return;
+    }
+
     axios
-      .get("http://127.0.0.1:8000/logs/week")
+      .get(`${apiUrl}/logs/week`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
       .then((res) => {
         const grouped: Record<string, FoodItem[]> = {};
         const totals = { calories: 0, protein: 0, carbs: 0, fat: 0 };
@@ -99,15 +101,23 @@ export default function DiaryPage() {
         setWeekTotal(totals);
       })
       .catch((err) => {
-        console.error("Failed to fetch logs:", err);
-      });
+        if (err.response?.status === 401) {
+          removeToken();
+          router.push("/login");
+        } else {
+          console.error("Failed to fetch logs:", err);
+          setError("Failed to load diary. Please try again.");
+        }
+      })
+      .finally(() => setLoading(false));
   }, []);
 
+  if (loading) return <div className="p-6 text-gray-500">Loading…</div>;
+  if (error) return <div className="p-6 text-red-500">{error}</div>;
+
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <h2 className="text-2xl font-bold mb-6">
-        📘 Weekly Diary – Food Breakdown
-      </h2>
+    <div className="p-6 max-w-4xl mx-auto pb-24">
+      <h2 className="text-2xl font-bold mb-6">📘 Weekly Diary – Food Breakdown</h2>
 
       {dailyLogs.length === 0 && <p>No logs found.</p>}
 
@@ -155,6 +165,7 @@ export default function DiaryPage() {
           </BarChart>
         </ResponsiveContainer>
       </div>
+      <BottomNav />
     </div>
   );
 }
