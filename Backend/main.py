@@ -158,6 +158,16 @@ class PlanSession(Base):
     plan = relationship("WorkoutPlan", back_populates="sessions")
 
 
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, nullable=False, index=True)
+    token = Column(String, unique=True, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used = Column(Integer, default=0)  # 0 = unused, 1 = used
+
+
 Base.metadata.create_all(bind=engine)
 
 # Migrate new nullable columns onto existing users table (SQLite safe)
@@ -292,6 +302,24 @@ class LoginInput(BaseModel):
     password: str
 
 
+class ForgotPasswordInput(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordInput(BaseModel):
+    token: str = Field(min_length=1, max_length=200)
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def password_valid(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        if len(v.encode("utf-8")) > 72:
+            raise ValueError("Password must be 72 characters or fewer")
+        return v
+
+
 class WorkoutInput(BaseModel):
     name: str = Field(max_length=200)
     exercises_json: Optional[str] = Field(default=None, max_length=5000)
@@ -424,6 +452,76 @@ def login(request: Request, data: LoginInput, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     token = create_access_token(user.id)
     return {"access_token": token, "token_type": "bearer"}
+
+
+# ============================================================
+# POST /auth/forgot-password  — request a password reset token
+# POST /auth/reset-password   — consume the token and set new password
+# ============================================================
+import secrets as _secrets
+
+@app.post("/auth/forgot-password")
+@limiter.limit("5/minute")
+def forgot_password(request: Request, data: ForgotPasswordInput, db: Session = Depends(get_db)):
+    email = data.email.lower().strip()
+    user = db.query(User).filter(User.email == email).first()
+
+    # Always return the same message so we don't leak whether an email exists
+    generic = {"message": "If that email is registered, a reset link has been sent."}
+
+    if not user:
+        return generic
+
+    # Expire any previous unused tokens for this email
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.email == email,
+        PasswordResetToken.used == 0,
+    ).update({"used": 1})
+    db.commit()
+
+    token = _secrets.token_urlsafe(32)
+    reset = PasswordResetToken(
+        email=email,
+        token=token,
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+    )
+    db.add(reset)
+    db.commit()
+
+    # Dev mode: log the token so it can be used without an email server.
+    # Replace this block with actual email sending before going to production.
+    reset_url = f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/reset-password?token={token}"
+    print(f"\n[DEV] Password reset requested for {email}")
+    print(f"[DEV] Reset URL: {reset_url}\n", flush=True)
+
+    return generic
+
+
+@app.post("/auth/reset-password")
+@limiter.limit("10/minute")
+def reset_password(request: Request, data: ResetPasswordInput, db: Session = Depends(get_db)):
+    record = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token == data.token,
+        PasswordResetToken.used == 0,
+    ).first()
+
+    if not record:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token.")
+
+    if datetime.utcnow() > record.expires_at:
+        record.used = 1
+        db.commit()
+        raise HTTPException(status_code=400, detail="Reset token has expired. Please request a new one.")
+
+    user = db.query(User).filter(User.email == record.email).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token.")
+
+    user.hashed_password = hash_password(data.new_password)
+    record.used = 1
+    db.commit()
+
+    return {"message": "Password updated successfully. You can now log in."}
 
 
 # ============================================================

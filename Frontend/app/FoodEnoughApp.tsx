@@ -54,6 +54,7 @@ export default function FoodEnoughApp() {
   const [savingBarcode, setSavingBarcode] = useState(false);
   const [saveBarcodeError, setSaveBarcodeError] = useState("");
   const [lookingUpBarcode, setLookingUpBarcode] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const mealInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -247,6 +248,11 @@ export default function FoodEnoughApp() {
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setAnalysisError("Image must be under 5 MB. Please choose a smaller file.");
+      e.target.value = "";
+      return;
+    }
     if (imagePreview) URL.revokeObjectURL(imagePreview);
     setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
@@ -320,10 +326,7 @@ export default function FoodEnoughApp() {
           <button onClick={handleLogout} title="Log out">
             <LogOut className="w-5 h-5 text-green-700" />
           </button>
-          <div className="relative">
-            <Bell className="w-7 h-7 text-green-800" />
-            <span className="absolute top-0 right-0 block w-2 h-2 bg-orange-500 rounded-full" />
-          </div>
+          <Bell className="w-7 h-7 text-green-800" />
         </div>
       </header>
 
@@ -634,27 +637,50 @@ export default function FoodEnoughApp() {
         ) : (
           <div className="space-y-3">
             {logs.map((log, i) => (
-              <div key={i} className="bg-white rounded-2xl p-4 shadow-sm flex justify-between items-center">
-                <div>
-                  <div className="font-semibold text-gray-800">{log.input_text}</div>
-                  <div className="text-sm text-gray-500">
-                    {log.calories} kcal • {log.protein}P • {log.carbs}C • {log.fat}F
+              <div key={i} className="bg-white rounded-2xl p-4 shadow-sm">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <div className="font-semibold text-gray-800">{log.input_text}</div>
+                    <div className="text-sm text-gray-500">
+                      {log.calories} kcal • {log.protein}P • {log.carbs}C • {log.fat}F
+                    </div>
                   </div>
+                  {deleteConfirmId !== log.id && (
+                    <button
+                      onClick={() => setDeleteConfirmId(log.id)}
+                      className="text-red-400 hover:text-red-600 text-xl ml-3 transition-colors flex-shrink-0"
+                      title="Delete"
+                    >
+                      ×
+                    </button>
+                  )}
                 </div>
-                <button
-                  onClick={async () => {
-                    const res = await fetch(`${apiUrl}/logs/${log.id}`, {
-                      method: "DELETE",
-                      headers: authHeaders(),
-                    });
-                    if (res.status === 401) { handleUnauthorized(); return; }
-                    if (res.ok) { loadLogs(); loadSummary(); }
-                  }}
-                  className="text-red-400 hover:text-red-600 text-xl ml-3 transition-colors"
-                  title="Delete"
-                >
-                  ×
-                </button>
+                {deleteConfirmId === log.id && (
+                  <div className="mt-2 pt-2 border-t border-gray-100 flex items-center justify-between">
+                    <p className="text-sm text-gray-500">Remove this entry?</p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setDeleteConfirmId(null)}
+                        className="px-3 py-1 text-xs rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={async () => {
+                          const res = await fetch(`${apiUrl}/logs/${log.id}`, {
+                            method: "DELETE",
+                            headers: authHeaders(),
+                          });
+                          if (res.status === 401) { handleUnauthorized(); return; }
+                          if (res.ok) { setDeleteConfirmId(null); loadLogs(); loadSummary(); }
+                        }}
+                        className="px-3 py-1 text-xs rounded-lg bg-red-500 text-white hover:bg-red-600"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
