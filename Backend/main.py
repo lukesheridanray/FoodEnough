@@ -5,11 +5,11 @@
 # All food log endpoints are protected and scoped per user.
 # ============================================================
 
-from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi import FastAPI, Depends, HTTPException, Request, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy import create_engine, Column, Integer, Float, DateTime, Text, String, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, Float, DateTime, Text, String, ForeignKey, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from datetime import datetime, timedelta
@@ -25,6 +25,7 @@ import csv
 from io import StringIO
 import re
 import sys
+import base64
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -66,7 +67,15 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    calorie_goal = Column(Integer, nullable=True)
+    protein_goal = Column(Integer, nullable=True)
+    carbs_goal = Column(Integer, nullable=True)
+    fat_goal = Column(Integer, nullable=True)
     logs = relationship("FoodLog", back_populates="user")
+    workouts = relationship("Workout", back_populates="user")
+    weight_entries = relationship("WeightEntry", back_populates="user")
+    fitness_profile = relationship("FitnessProfile", back_populates="user", uselist=False)
+    workout_plans = relationship("WorkoutPlan", back_populates="user")
 
 
 class FoodLog(Base):
@@ -84,7 +93,87 @@ class FoodLog(Base):
     user = relationship("User", back_populates="logs")
 
 
+class Workout(Base):
+    __tablename__ = "workouts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    name = Column(String, nullable=False)
+    exercises_json = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    user = relationship("User", back_populates="workouts")
+
+
+class WeightEntry(Base):
+    __tablename__ = "weight_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    weight_lbs = Column(Float, nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    user = relationship("User", back_populates="weight_entries")
+
+
+class FitnessProfile(Base):
+    __tablename__ = "fitness_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
+    gym_access = Column(String, nullable=True)
+    goal = Column(String, nullable=True)
+    experience_level = Column(String, nullable=True)
+    days_per_week = Column(Integer, nullable=True)
+    session_duration_minutes = Column(Integer, nullable=True)
+    limitations = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    user = relationship("User", back_populates="fitness_profile")
+
+
+class WorkoutPlan(Base):
+    __tablename__ = "workout_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    name = Column(String, nullable=False)
+    is_active = Column(Integer, default=1)  # 1 = active, 0 = inactive
+    total_weeks = Column(Integer, default=6)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    user = relationship("User", back_populates="workout_plans")
+    sessions = relationship("PlanSession", back_populates="plan", cascade="all, delete-orphan")
+
+
+class PlanSession(Base):
+    __tablename__ = "plan_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    plan_id = Column(Integer, ForeignKey("workout_plans.id"), nullable=False)
+    week_number = Column(Integer, nullable=False)
+    day_number = Column(Integer, nullable=False)
+    name = Column(String, nullable=False)
+    exercises_json = Column(Text, nullable=True)
+    is_completed = Column(Integer, default=0)  # 0 = pending, 1 = done
+    completed_at = Column(DateTime, nullable=True)
+    plan = relationship("WorkoutPlan", back_populates="sessions")
+
+
 Base.metadata.create_all(bind=engine)
+
+# Migrate new nullable columns onto existing users table (SQLite safe)
+_MIGRATIONS = [
+    "ALTER TABLE users ADD COLUMN calorie_goal INTEGER",
+    "ALTER TABLE users ADD COLUMN protein_goal INTEGER",
+    "ALTER TABLE users ADD COLUMN carbs_goal INTEGER",
+    "ALTER TABLE users ADD COLUMN fat_goal INTEGER",
+]
+with engine.connect() as _conn:
+    for _sql in _MIGRATIONS:
+        try:
+            _conn.execute(text(_sql))
+            _conn.commit()
+        except Exception:
+            pass  # column already exists
 
 
 # ============================================================
@@ -99,9 +188,10 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+_cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -202,6 +292,105 @@ class LoginInput(BaseModel):
     password: str
 
 
+class WorkoutInput(BaseModel):
+    name: str = Field(max_length=200)
+    exercises_json: Optional[str] = Field(default=None, max_length=5000)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("name")
+    @classmethod
+    def name_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("name cannot be blank")
+        return v
+
+
+class WorkoutGenerateInput(BaseModel):
+    goal: str = Field(max_length=500)
+    available_equipment: Optional[str] = Field(default=None, max_length=500)
+    duration_minutes: Optional[int] = None
+
+    @field_validator("goal")
+    @classmethod
+    def goal_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("goal cannot be blank")
+        return v
+
+    @field_validator("duration_minutes")
+    @classmethod
+    def duration_positive(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v <= 0:
+            raise ValueError("duration_minutes must be greater than 0")
+        return v
+
+
+class WeightInput(BaseModel):
+    weight_lbs: float
+
+    @field_validator("weight_lbs")
+    @classmethod
+    def weight_valid(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("weight_lbs must be greater than 0")
+        if v > 1500:
+            raise ValueError("weight_lbs must be 1500 or less")
+        return v
+
+
+class ProfileUpdate(BaseModel):
+    calorie_goal: Optional[int] = None
+    protein_goal: Optional[int] = None
+    carbs_goal: Optional[int] = None
+    fat_goal: Optional[int] = None
+
+    @field_validator("calorie_goal", "protein_goal", "carbs_goal", "fat_goal")
+    @classmethod
+    def goals_positive(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v <= 0:
+            raise ValueError("Goal values must be greater than 0")
+        return v
+
+
+class FitnessProfileInput(BaseModel):
+    gym_access: str = Field(max_length=50)
+    goal: str = Field(max_length=100)
+    experience_level: str = Field(max_length=50)
+    days_per_week: int
+    session_duration_minutes: int
+    limitations: Optional[str] = Field(default=None, max_length=1000)
+
+    @field_validator("days_per_week")
+    @classmethod
+    def days_valid(cls, v: int) -> int:
+        if v < 1 or v > 7:
+            raise ValueError("days_per_week must be between 1 and 7")
+        return v
+
+    @field_validator("session_duration_minutes")
+    @classmethod
+    def duration_valid(cls, v: int) -> int:
+        if v < 10 or v > 180:
+            raise ValueError("session_duration_minutes must be between 10 and 180")
+        return v
+
+
+class ParsedLogInput(BaseModel):
+    input_text: str = Field(max_length=2000)
+    calories: float
+    protein: float
+    carbs: float
+    fat: float
+    parsed_json: Optional[str] = Field(default=None, max_length=10000)
+
+    @field_validator("calories", "protein", "carbs", "fat")
+    @classmethod
+    def macros_non_negative(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("Macro values must be non-negative")
+        return v
+
+
 # ============================================================
 # Auth Endpoints
 # ============================================================
@@ -252,7 +441,7 @@ def get_macros_from_input(
             base_prompt = f.read()
 
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": base_prompt},
                 {"role": "user", "content": data.input_text},
@@ -291,7 +480,7 @@ def save_log(
             base_prompt = f.read()
 
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": base_prompt},
                 {"role": "user", "content": data.input_text},
@@ -346,6 +535,200 @@ def delete_log(
     db.delete(log)
     db.commit()
     return {"status": "deleted"}
+
+
+# ============================================================
+# POST /save_log/image  — photo food log via GPT-4o-mini vision
+# ============================================================
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"}
+MAX_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MB
+
+IMAGE_PROMPT = """You are a calorie and macronutrient estimating assistant analyzing a photo of food.
+
+Identify all food items visible in the image and estimate their calories and macros. Return a single valid JSON object in this exact format:
+
+{
+  "description": "Brief plain-text description of what you see (e.g. 'Grilled chicken with white rice and broccoli')",
+  "items": [
+    { "name": "grilled chicken", "calories": 250, "protein": 30, "carbs": 0, "fat": 6 },
+    { "name": "white rice", "calories": 200, "protein": 4, "carbs": 40, "fat": 1 }
+  ],
+  "total": { "calories": 450, "protein": 34, "carbs": 40, "fat": 7 }
+}
+
+Rules:
+- Output ONLY valid JSON. No code fences, no extra text, no markdown.
+- Round all numbers to whole numbers.
+- Estimate based on visible portion sizes; use typical serving sizes when unclear.
+- Never guess high — use conservative, realistic estimates.
+- If the image contains no food, return all zeros and set description to "No food detected".
+- If the image is unclear or not a food photo, return all zeros and set description to "Could not identify food"."""
+
+
+@app.post("/save_log/image")
+@limiter.limit("15/minute")
+async def save_log_from_image(
+    request: Request,
+    image: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if image.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Image must be JPEG, PNG, WEBP, or GIF",
+        )
+
+    contents = await image.read()
+    if len(contents) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=400, detail="Image must be 5 MB or smaller")
+
+    b64_image = base64.b64encode(contents).decode("utf-8")
+    media_type = image.content_type or "image/jpeg"
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": IMAGE_PROMPT},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{media_type};base64,{b64_image}",
+                                "detail": "low",
+                            },
+                        },
+                    ],
+                }
+            ],
+            max_tokens=600,
+        )
+
+        ai_reply = response.choices[0].message.content
+
+        try:
+            parsed = extract_json(ai_reply)
+            total = parsed["total"]
+        except Exception as e:
+            print("Image log JSON parse error:", e)
+            raise HTTPException(status_code=500, detail="AI response was not valid JSON")
+
+        description = parsed.get("description", "Photo log")
+
+        log = FoodLog(
+            user_id=current_user.id,
+            input_text=f"📷 {description}",
+            parsed_json=json.dumps(parsed),
+            calories=total["calories"],
+            protein=total["protein"],
+            carbs=total["carbs"],
+            fat=total["fat"],
+        )
+        db.add(log)
+        db.commit()
+        db.refresh(log)
+        return {"status": "success", "entry_id": log.id, "description": description}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print("/save_log/image error:", e)
+        raise HTTPException(status_code=500, detail="An internal error occurred")
+
+
+# ============================================================
+# POST /parse_log/image  — analyze image, return breakdown (no DB write)
+# ============================================================
+@app.post("/parse_log/image")
+@limiter.limit("15/minute")
+async def parse_log_from_image(
+    request: Request,
+    image: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    if image.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Image must be JPEG, PNG, WEBP, or GIF",
+        )
+
+    contents = await image.read()
+    if len(contents) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=400, detail="Image must be 5 MB or smaller")
+
+    b64_image = base64.b64encode(contents).decode("utf-8")
+    media_type = image.content_type or "image/jpeg"
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": IMAGE_PROMPT},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{media_type};base64,{b64_image}",
+                                "detail": "low",
+                            },
+                        },
+                    ],
+                }
+            ],
+            max_tokens=600,
+        )
+
+        ai_reply = response.choices[0].message.content
+
+        try:
+            parsed = extract_json(ai_reply)
+        except Exception as e:
+            print("/parse_log/image JSON parse error:", e)
+            raise HTTPException(status_code=500, detail="AI response was not valid JSON")
+
+        return {
+            "description": parsed.get("description", "Photo log"),
+            "items": parsed.get("items", []),
+            "total": parsed.get("total", {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("/parse_log/image error:", e)
+        raise HTTPException(status_code=500, detail="An internal error occurred")
+
+
+# ============================================================
+# POST /logs/save-parsed  — save pre-analyzed data (no AI call)
+# ============================================================
+@app.post("/logs/save-parsed")
+@limiter.limit("30/minute")
+def save_parsed_log(
+    request: Request,
+    data: ParsedLogInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    log = FoodLog(
+        user_id=current_user.id,
+        input_text=data.input_text,
+        parsed_json=data.parsed_json,
+        calories=data.calories,
+        protein=data.protein,
+        carbs=data.carbs,
+        fat=data.fat,
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+    return {"status": "success", "entry_id": log.id}
 
 
 # ============================================================
@@ -456,3 +839,557 @@ def export_logs_csv(
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=food_logs.csv"},
     )
+
+
+# ============================================================
+# GET /profile  — get current user's profile and goals
+# ============================================================
+@app.get("/profile")
+def get_profile(
+    current_user: User = Depends(get_current_user),
+):
+    return {
+        "email": current_user.email,
+        "calorie_goal": current_user.calorie_goal,
+        "protein_goal": current_user.protein_goal,
+        "carbs_goal": current_user.carbs_goal,
+        "fat_goal": current_user.fat_goal,
+    }
+
+
+# ============================================================
+# PUT /profile  — update macro targets and calorie goal
+# ============================================================
+@app.put("/profile")
+def update_profile(
+    data: ProfileUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user.calorie_goal = data.calorie_goal
+    current_user.protein_goal = data.protein_goal
+    current_user.carbs_goal = data.carbs_goal
+    current_user.fat_goal = data.fat_goal
+    db.commit()
+    db.refresh(current_user)
+    return {
+        "calorie_goal": current_user.calorie_goal,
+        "protein_goal": current_user.protein_goal,
+        "carbs_goal": current_user.carbs_goal,
+        "fat_goal": current_user.fat_goal,
+    }
+
+
+# ============================================================
+# POST /weight  — log a weight entry
+# ============================================================
+@app.post("/weight")
+@limiter.limit("30/minute")
+def log_weight(
+    request: Request,
+    data: WeightInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    entry = WeightEntry(user_id=current_user.id, weight_lbs=data.weight_lbs)
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return {"status": "success", "entry_id": entry.id, "weight_lbs": entry.weight_lbs}
+
+
+# ============================================================
+# GET /weight/history  — weight entries for current user
+# ============================================================
+@app.get("/weight/history")
+def get_weight_history(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    entries = (
+        db.query(WeightEntry)
+        .filter(WeightEntry.user_id == current_user.id)
+        .order_by(WeightEntry.timestamp.desc())
+        .limit(90)
+        .all()
+    )
+    return {
+        "entries": [
+            {"id": e.id, "weight_lbs": e.weight_lbs, "timestamp": e.timestamp.isoformat()}
+            for e in entries
+        ]
+    }
+
+
+# ============================================================
+# POST /workouts  — log a workout
+# ============================================================
+@app.post("/workouts")
+@limiter.limit("30/minute")
+def log_workout(
+    request: Request,
+    data: WorkoutInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    workout = Workout(
+        user_id=current_user.id,
+        name=data.name,
+        exercises_json=data.exercises_json,
+        notes=data.notes,
+    )
+    db.add(workout)
+    db.commit()
+    db.refresh(workout)
+    return {"status": "success", "workout_id": workout.id}
+
+
+# ============================================================
+# GET /workouts/history  — workout history for current user
+# ============================================================
+@app.get("/workouts/history")
+def get_workout_history(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    workouts = (
+        db.query(Workout)
+        .filter(Workout.user_id == current_user.id)
+        .order_by(Workout.timestamp.desc())
+        .limit(50)
+        .all()
+    )
+    results = []
+    for w in workouts:
+        try:
+            exercises = json.loads(w.exercises_json) if w.exercises_json else None
+        except Exception:
+            exercises = None
+        results.append({
+            "id": w.id,
+            "name": w.name,
+            "exercises": exercises,
+            "notes": w.notes,
+            "timestamp": w.timestamp.isoformat(),
+        })
+    return {"workouts": results}
+
+
+# ============================================================
+# DELETE /workouts/{workout_id}  — delete a workout
+# ============================================================
+@app.delete("/workouts/{workout_id}")
+def delete_workout(
+    workout_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    workout = db.query(Workout).filter(Workout.id == workout_id, Workout.user_id == current_user.id).first()
+    if not workout:
+        raise HTTPException(status_code=404, detail="Workout not found")
+    db.delete(workout)
+    db.commit()
+    return {"status": "deleted"}
+
+
+# ============================================================
+# POST /workouts/generate  — AI workout generation
+# ============================================================
+@app.post("/workouts/generate")
+@limiter.limit("10/minute")
+def generate_workout(
+    request: Request,
+    data: WorkoutGenerateInput,
+    current_user: User = Depends(get_current_user),
+):
+    equipment_line = f"Available equipment: {data.available_equipment}." if data.available_equipment else "Assume bodyweight or standard gym equipment."
+    duration_line = f"Target duration: {data.duration_minutes} minutes." if data.duration_minutes else ""
+
+    prompt = f"""You are an expert personal trainer. Generate a workout plan as a valid JSON object.
+
+Goal: {data.goal}
+{equipment_line}
+{duration_line}
+
+Return ONLY valid JSON in this exact format:
+{{
+  "name": "Workout name (e.g. Push Day, Full Body HIIT)",
+  "exercises": [
+    {{"name": "Exercise name", "sets": 3, "reps": "10-12", "rest_seconds": 60, "notes": "optional tip"}},
+    ...
+  ],
+  "total_duration_minutes": 45,
+  "notes": "Any overall notes about the workout"
+}}
+
+Rules:
+- Return ONLY valid JSON, no markdown, no code fences, no extra text.
+- Include 4-8 exercises appropriate for the goal.
+- Be specific with exercise names.
+- Rest periods should match the goal (shorter for cardio/HIIT, longer for strength).
+"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+        )
+        ai_reply = response.choices[0].message.content
+        try:
+            parsed = extract_json(ai_reply)
+            return {"workout": parsed}
+        except Exception:
+            return {"raw_output": ai_reply, "warning": "Could not parse clean JSON"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("/workouts/generate error:", e)
+        raise HTTPException(status_code=500, detail="An internal error occurred")
+
+
+# ============================================================
+# GET /summary/today  — real data for Today's Summary cards
+# ============================================================
+@app.get("/summary/today")
+def get_today_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    now = datetime.utcnow()
+    start_of_day = datetime(now.year, now.month, now.day)
+
+    # Today's calories from food logs
+    today_logs = (
+        db.query(FoodLog)
+        .filter(FoodLog.user_id == current_user.id, FoodLog.timestamp >= start_of_day)
+        .all()
+    )
+    calories_today = sum(log.calories or 0 for log in today_logs)
+
+    # Calories remaining vs goal
+    calorie_goal = current_user.calorie_goal
+    calories_remaining = (calorie_goal - calories_today) if calorie_goal is not None else None
+
+    # Latest weight entry
+    latest_weight = (
+        db.query(WeightEntry)
+        .filter(WeightEntry.user_id == current_user.id)
+        .order_by(WeightEntry.timestamp.desc())
+        .first()
+    )
+
+    # Most recent workout
+    latest_workout = (
+        db.query(Workout)
+        .filter(Workout.user_id == current_user.id)
+        .order_by(Workout.timestamp.desc())
+        .first()
+    )
+
+    return {
+        "calories_today": round(calories_today),
+        "calorie_goal": calorie_goal,
+        "calories_remaining": round(calories_remaining) if calories_remaining is not None else None,
+        "latest_weight_lbs": latest_weight.weight_lbs if latest_weight else None,
+        "latest_workout_name": latest_workout.name if latest_workout else None,
+    }
+
+
+# ============================================================
+# GET /fitness-profile  — get user's quiz answers
+# ============================================================
+@app.get("/fitness-profile")
+def get_fitness_profile(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    profile = db.query(FitnessProfile).filter(FitnessProfile.user_id == current_user.id).first()
+    if not profile:
+        return {"profile": None}
+    return {
+        "profile": {
+            "gym_access": profile.gym_access,
+            "goal": profile.goal,
+            "experience_level": profile.experience_level,
+            "days_per_week": profile.days_per_week,
+            "session_duration_minutes": profile.session_duration_minutes,
+            "limitations": profile.limitations,
+        }
+    }
+
+
+# ============================================================
+# PUT /fitness-profile  — save quiz answers (upsert)
+# ============================================================
+@app.put("/fitness-profile")
+@limiter.limit("20/minute")
+def update_fitness_profile(
+    request: Request,
+    data: FitnessProfileInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    profile = db.query(FitnessProfile).filter(FitnessProfile.user_id == current_user.id).first()
+    if not profile:
+        profile = FitnessProfile(user_id=current_user.id)
+        db.add(profile)
+    profile.gym_access = data.gym_access
+    profile.goal = data.goal
+    profile.experience_level = data.experience_level
+    profile.days_per_week = data.days_per_week
+    profile.session_duration_minutes = data.session_duration_minutes
+    profile.limitations = data.limitations
+    profile.updated_at = datetime.utcnow()
+    db.commit()
+    return {"status": "success"}
+
+
+# ============================================================
+# POST /workout-plans/generate  — AI-generate a 6-week plan
+# ============================================================
+@app.post("/workout-plans/generate")
+@limiter.limit("5/minute")
+def generate_workout_plan(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    profile = db.query(FitnessProfile).filter(FitnessProfile.user_id == current_user.id).first()
+    if not profile:
+        raise HTTPException(status_code=400, detail="Complete your fitness profile quiz first")
+
+    equipment_desc = {
+        "full_gym": "a full gym with barbells, dumbbells, cables, and machines",
+        "home_gym": "a home gym with dumbbells and/or resistance bands",
+        "bodyweight": "bodyweight only — no equipment",
+    }.get(profile.gym_access, profile.gym_access or "standard gym equipment")
+
+    goal_desc = {
+        "build_muscle": "build muscle and increase strength",
+        "lose_weight": "lose weight and improve body composition",
+        "improve_cardio": "improve cardiovascular fitness and endurance",
+        "general_fitness": "improve general fitness and overall health",
+    }.get(profile.goal, profile.goal or "general fitness")
+
+    experience_desc = {
+        "beginner": "beginner (less than 1 year of training)",
+        "intermediate": "intermediate (1–3 years of training)",
+        "advanced": "advanced (3+ years of training)",
+    }.get(profile.experience_level, profile.experience_level or "intermediate")
+
+    # Sanitize limitations: strip characters that could escape prompt structure
+    _raw_limitations = (profile.limitations or "").strip()
+    _safe_limitations = re.sub(r"[{}\[\]<>]", "", _raw_limitations)[:500]
+    limitations_line = (
+        f"Physical limitations to work around: {_safe_limitations}."
+        if _safe_limitations
+        else "No physical limitations."
+    )
+
+    prompt = f"""You are an expert personal trainer. Generate a complete 6-week progressive workout plan as valid JSON.
+
+Athlete profile:
+- Goal: {goal_desc}
+- Equipment: {equipment_desc}
+- Experience: {experience_desc}
+- Training days per week: {profile.days_per_week}
+- Session duration: {profile.session_duration_minutes} minutes
+- {limitations_line}
+
+Requirements:
+- Exactly {profile.days_per_week} sessions per week for all 6 weeks
+- Each session fits within {profile.session_duration_minutes} minutes
+- Progressive overload: intensity and/or volume increases each week
+- Week 1 = Foundation, Week 6 = Peak
+- Each session: 4–6 exercises
+
+Return ONLY valid JSON (no markdown, no code fences). Keep exercise notes very brief or omit them to stay within token limits:
+{{
+  "name": "Plan name",
+  "notes": "1-2 sentence program description",
+  "weeks": [
+    {{
+      "week_number": 1,
+      "sessions": [
+        {{
+          "day_number": 1,
+          "name": "Session name (e.g. Upper Body A, Push Day, Full Body 1)",
+          "exercises": [
+            {{"name": "Exercise name", "sets": 3, "reps": "8-10", "rest_seconds": 90}}
+          ]
+        }}
+      ]
+    }}
+  ]
+}}"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=12000,
+        )
+        ai_reply = response.choices[0].message.content
+        try:
+            parsed = extract_json(ai_reply)
+        except Exception:
+            raise HTTPException(status_code=500, detail="AI returned an unexpected response. Please try again.")
+
+        # Deactivate any existing active plans for this user (part of the same transaction)
+        db.query(WorkoutPlan).filter(
+            WorkoutPlan.user_id == current_user.id,
+            WorkoutPlan.is_active == 1,
+        ).update({"is_active": 0})
+
+        # Create the new plan
+        plan = WorkoutPlan(
+            user_id=current_user.id,
+            name=parsed.get("name", "My 6-Week Plan"),
+            notes=parsed.get("notes"),
+            total_weeks=6,
+            is_active=1,
+        )
+        db.add(plan)
+        db.flush()  # get plan.id before adding sessions
+
+        # Create all sessions
+        for week_data in parsed.get("weeks", []):
+            week_num = week_data.get("week_number", 1)
+            for session_data in week_data.get("sessions", []):
+                session = PlanSession(
+                    plan_id=plan.id,
+                    week_number=week_num,
+                    day_number=session_data.get("day_number", 1),
+                    name=session_data.get("name", "Workout"),
+                    exercises_json=json.dumps(session_data.get("exercises", [])),
+                    is_completed=0,
+                )
+                db.add(session)
+
+        db.commit()
+        db.refresh(plan)
+        return {"status": "success", "plan_id": plan.id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print("/workout-plans/generate error:", e)
+        raise HTTPException(status_code=500, detail="An internal error occurred")
+
+
+# ============================================================
+# GET /workout-plans/active  — get the current active plan
+# ============================================================
+@app.get("/workout-plans/active")
+def get_active_plan(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    plan = (
+        db.query(WorkoutPlan)
+        .filter(WorkoutPlan.user_id == current_user.id, WorkoutPlan.is_active == 1)
+        .first()
+    )
+    if not plan:
+        return {"plan": None}
+
+    sessions = (
+        db.query(PlanSession)
+        .filter(PlanSession.plan_id == plan.id)
+        .order_by(PlanSession.week_number, PlanSession.day_number)
+        .all()
+    )
+
+    # Group sessions by week number
+    weeks: dict = {}
+    for s in sessions:
+        wk = s.week_number
+        if wk not in weeks:
+            weeks[wk] = []
+        try:
+            exercises = json.loads(s.exercises_json) if s.exercises_json else []
+        except Exception:
+            exercises = []
+        weeks[wk].append({
+            "id": s.id,
+            "day_number": s.day_number,
+            "name": s.name,
+            "exercises": exercises,
+            "is_completed": bool(s.is_completed),
+            "completed_at": s.completed_at.isoformat() if s.completed_at else None,
+        })
+
+    total_sessions = len(sessions)
+    completed_sessions = sum(1 for s in sessions if s.is_completed)
+
+    return {
+        "plan": {
+            "id": plan.id,
+            "name": plan.name,
+            "notes": plan.notes,
+            "total_weeks": plan.total_weeks,
+            "created_at": plan.created_at.isoformat(),
+            "total_sessions": total_sessions,
+            "completed_sessions": completed_sessions,
+            "weeks": [
+                {"week_number": wk, "sessions": weeks[wk]}
+                for wk in sorted(weeks.keys())
+            ],
+        }
+    }
+
+
+# ============================================================
+# DELETE /workout-plans/{plan_id}  — deactivate a plan
+# ============================================================
+@app.delete("/workout-plans/{plan_id}")
+@limiter.limit("10/minute")
+def deactivate_workout_plan(
+    request: Request,
+    plan_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    plan = db.query(WorkoutPlan).filter(
+        WorkoutPlan.id == plan_id,
+        WorkoutPlan.user_id == current_user.id,
+    ).first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    plan.is_active = 0
+    db.commit()
+    return {"status": "deactivated"}
+
+
+# ============================================================
+# PUT /plan-sessions/{session_id}/complete  — mark session done
+# ============================================================
+@app.put("/plan-sessions/{session_id}/complete")
+@limiter.limit("30/minute")
+def complete_plan_session(
+    request: Request,
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Verify ownership via the plan
+    session = (
+        db.query(PlanSession)
+        .join(WorkoutPlan)
+        .filter(
+            PlanSession.id == session_id,
+            WorkoutPlan.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.is_completed:
+        return {"status": "already_completed"}
+    session.is_completed = 1
+    session.completed_at = datetime.utcnow()
+    db.commit()
+    return {"status": "completed"}
