@@ -46,9 +46,6 @@ export default function ProfilePage() {
   const [proteinGoal, setProteinGoal] = useState("");
   const [carbsGoal, setCarbsGoal] = useState("");
   const [fatGoal, setFatGoal] = useState("");
-  const [savingGoals, setSavingGoals] = useState(false);
-  const [goalsSuccess, setGoalsSuccess] = useState(false);
-  const [goalsError, setGoalsError] = useState("");
 
   // Anthropometric / calculator state
   const [age, setAge] = useState<string>("");
@@ -182,38 +179,6 @@ export default function ProfilePage() {
     Promise.all([loadProfile(), loadWeightHistory(), loadTodaySummary()]).finally(() => setLoading(false));
   }, []);
 
-  const handleSaveGoals = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setGoalsError("");
-    setGoalsSuccess(false);
-    setSavingGoals(true);
-    try {
-      const body: any = {
-        calorie_goal: calorieGoal ? parseInt(calorieGoal) : null,
-        protein_goal: proteinGoal ? parseInt(proteinGoal) : null,
-        carbs_goal: carbsGoal ? parseInt(carbsGoal) : null,
-        fat_goal: fatGoal ? parseInt(fatGoal) : null,
-      };
-      const res = await fetch(`${API_URL}/profile`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify(body),
-      });
-      if (res.status === 401) { handleUnauthorized(); return; }
-      if (res.ok) {
-        setGoalsSuccess(true);
-        loadProfile();
-        setTimeout(() => setGoalsSuccess(false), 3000);
-      } else {
-        const err = await res.json();
-        setGoalsError(parseApiError(err.detail) || "Failed to save goals.");
-      }
-    } catch {
-      setGoalsError("Connection failed. Please try again.");
-    } finally {
-      setSavingGoals(false);
-    }
-  };
 
   const handleCalculateGoals = async () => {
     setCalcError("");
@@ -603,63 +568,6 @@ export default function ProfilePage() {
         </section>
       )}
 
-      {/* Calorie & Macro Goals */}
-      <section className="px-5 mt-4">
-        <h2 className="text-lg font-bold text-green-900 mb-2">Daily Goals</h2>
-        <form onSubmit={handleSaveGoals} className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-medium text-gray-600">Calories (kcal)</label>
-              <input
-                type="number"
-                value={calorieGoal}
-                onChange={(e) => setCalorieGoal(e.target.value)}
-                placeholder="e.g. 2000"
-                className="mt-1 w-full border border-green-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-600">Protein (g)</label>
-              <input
-                type="number"
-                value={proteinGoal}
-                onChange={(e) => setProteinGoal(e.target.value)}
-                placeholder="e.g. 150"
-                className="mt-1 w-full border border-green-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-600">Carbs (g)</label>
-              <input
-                type="number"
-                value={carbsGoal}
-                onChange={(e) => setCarbsGoal(e.target.value)}
-                placeholder="e.g. 200"
-                className="mt-1 w-full border border-green-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-600">Fat (g)</label>
-              <input
-                type="number"
-                value={fatGoal}
-                onChange={(e) => setFatGoal(e.target.value)}
-                placeholder="e.g. 65"
-                className="mt-1 w-full border border-green-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
-              />
-            </div>
-          </div>
-          {goalsError && <p className="text-red-500 text-sm">{goalsError}</p>}
-          {goalsSuccess && <p className="text-green-600 text-sm font-medium">Goals saved!</p>}
-          <button
-            type="submit"
-            disabled={savingGoals}
-            className="w-full py-2 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-xl font-medium shadow-md disabled:opacity-60"
-          >
-            {savingGoals ? "Saving…" : "Save Goals"}
-          </button>
-        </form>
-      </section>
 
       {/* Today's Progress */}
       {todaySummary && (todaySummary.calorie_goal || todaySummary.protein_goal) && (
