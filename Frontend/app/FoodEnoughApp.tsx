@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { getToken, removeToken, authHeaders } from "../lib/auth";
 import BottomNav from "./components/BottomNav";
 import BarcodeScanner from "./components/BarcodeScanner";
+import { API_URL } from "../lib/config";
 
 interface Summary {
   calories_today: number;
@@ -94,7 +95,6 @@ export default function FoodEnoughApp() {
   const [showManualAdvanced, setShowManualAdvanced] = useState(false);
   const mealInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
   const router = useRouter();
 
   const handleUnauthorized = () => {
