@@ -569,6 +569,7 @@ export default function FoodEnoughApp() {
 
         {/* Text tab */}
         {inputTab === "text" && (
+          <div>
           <form
             onSubmit={async (e) => {
               e.preventDefault();
@@ -615,6 +616,17 @@ export default function FoodEnoughApp() {
               {logging ? "Logging…" : "Log"}
             </button>
           </form>
+          <p className="text-xs text-gray-400 mt-1.5">
+            Packaged product? Use{" "}
+            <button
+              onClick={() => setInputTab("barcode")}
+              className="text-green-600 font-medium underline-offset-2 hover:underline"
+            >
+              Barcode
+            </button>
+            {" "}for exact label data.
+          </p>
+          </div>
         )}
 
         {/* Photo tab */}
