@@ -80,4 +80,4 @@ pytest test_main.py -v
 
 ## Author
 
-Luke Vaughan — [lukesheridanray@gmail.com](mailto:lukesheridanray@gmail.com)
+Luke Vaughan — [lukesheridanray@gmail.com](mailto:lukesheridanray@gmail.com) · [LinkedIn](https://linkedin.com/in/lukesheridanray/)
