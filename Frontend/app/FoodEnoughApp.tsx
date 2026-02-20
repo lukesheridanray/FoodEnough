@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
-import { LogOut, X, Camera, Loader2, ScanBarcode, Pencil } from "lucide-react";
+import { LogOut, X, Camera, Loader2, ScanBarcode, Pencil, MessageSquare, PenLine } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { getToken, removeToken, authHeaders } from "../lib/auth";
 import BottomNav from "./components/BottomNav";
@@ -545,18 +545,24 @@ export default function FoodEnoughApp() {
         <h2 className="text-lg font-bold text-green-900 mb-2">Add Meal</h2>
 
         {/* Tab switcher */}
-        <div className="flex bg-gray-100 rounded-xl p-1 mb-3 gap-1">
-          {(["text", "photo", "barcode", "manual"] as const).map((tab) => (
+        <div className="grid grid-cols-4 gap-2 mb-3">
+          {([
+            { key: "text",    Icon: MessageSquare, label: "Describe" },
+            { key: "photo",   Icon: Camera,        label: "Photo"    },
+            { key: "barcode", Icon: ScanBarcode,   label: "Barcode"  },
+            { key: "manual",  Icon: PenLine,       label: "Manual"   },
+          ] as const).map(({ key, Icon, label }) => (
             <button
-              key={tab}
-              onClick={() => setInputTab(tab)}
-              className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-all ${
-                inputTab === tab
-                  ? "bg-white text-green-700 shadow-sm"
-                  : "text-gray-500 hover:text-gray-700"
+              key={key}
+              onClick={() => setInputTab(key)}
+              className={`flex flex-col items-center gap-1.5 py-3 rounded-2xl transition-all ${
+                inputTab === key
+                  ? "bg-green-500 text-white shadow-md scale-[1.03]"
+                  : "bg-white text-gray-400 shadow-sm hover:text-green-500"
               }`}
             >
-              {tab === "text" ? "Text" : tab === "photo" ? "📷" : tab === "barcode" ? "🔍" : "✏️"}
+              <Icon className="w-5 h-5" />
+              <span className="text-xs font-semibold">{label}</span>
             </button>
           ))}
         </div>
