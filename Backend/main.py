@@ -382,6 +382,10 @@ def calculate_nutrition_goals(
     fat_g = round((target_calories * 0.30) / 9)     # 30% of calories from fat
     protein_cal = protein_g * 4
     fat_cal = fat_g * 9
+    # If protein + fat exceed the target, trim protein to fit
+    if protein_cal + fat_cal > target_calories:
+        protein_cal = max(0, target_calories - fat_cal)
+        protein_g = round(protein_cal / 4)
     carb_cal = max(0, target_calories - protein_cal - fat_cal)
     carbs_g = round(carb_cal / 4)
 

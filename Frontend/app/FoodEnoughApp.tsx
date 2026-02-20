@@ -278,6 +278,18 @@ export default function FoodEnoughApp() {
 
   const handleManualSave = async () => {
     if (!manualName.trim()) { setManualError("Food name is required."); return; }
+    const _cal = parseFloat(manualCalories) || 0;
+    const _pro = parseFloat(manualProtein) || 0;
+    const _carb = parseFloat(manualCarbs) || 0;
+    const _fat = parseFloat(manualFat) || 0;
+    const _fiber = manualFiber ? parseFloat(manualFiber) : null;
+    const _sugar = manualSugar ? parseFloat(manualSugar) : null;
+    const _sodium = manualSodium ? parseFloat(manualSodium) : null;
+    if ([_cal, _pro, _carb, _fat].some((v) => v < 0) ||
+        [_fiber, _sugar, _sodium].some((v) => v != null && v < 0)) {
+      setManualError("Nutrient values cannot be negative.");
+      return;
+    }
     setManualError("");
     setManualLoading(true);
     try {
@@ -286,13 +298,13 @@ export default function FoodEnoughApp() {
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           name: manualName.trim(),
-          calories: parseFloat(manualCalories) || 0,
-          protein: parseFloat(manualProtein) || 0,
-          carbs: parseFloat(manualCarbs) || 0,
-          fat: parseFloat(manualFat) || 0,
-          fiber: manualFiber ? parseFloat(manualFiber) : null,
-          sugar: manualSugar ? parseFloat(manualSugar) : null,
-          sodium: manualSodium ? parseFloat(manualSodium) : null,
+          calories: _cal,
+          protein: _pro,
+          carbs: _carb,
+          fat: _fat,
+          fiber: _fiber,
+          sugar: _sugar,
+          sodium: _sodium,
         }),
       });
       if (res.status === 401) { handleUnauthorized(); return; }
@@ -380,6 +392,9 @@ export default function FoodEnoughApp() {
           protein: imageAnalysis.total.protein,
           carbs: imageAnalysis.total.carbs,
           fat: imageAnalysis.total.fat,
+          fiber: null,
+          sugar: null,
+          sodium: null,
           parsed_json: JSON.stringify({
             description: imageAnalysis.description,
             items: imageAnalysis.items,
@@ -431,13 +446,21 @@ export default function FoodEnoughApp() {
             <div className="flex items-end justify-between mb-4">
               <div>
                 <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-0.5">
-                  {summary.calorie_goal ? "Calories Remaining" : "Calories Today"}
-                </p>
-                <p className="text-5xl font-bold text-green-700 leading-none">
                   {summary.calorie_goal
-                    ? (summary.calories_remaining ?? summary.calories_today)
-                    : summary.calories_today}
+                    ? (summary.calories_remaining != null && summary.calories_remaining < 0 ? "Over Goal" : "Calories Remaining")
+                    : "Calories Today"}
                 </p>
+                {(() => {
+                  const displayVal = summary.calorie_goal
+                    ? (summary.calories_remaining ?? summary.calories_today)
+                    : summary.calories_today;
+                  const isOver = summary.calorie_goal && summary.calories_remaining != null && summary.calories_remaining < 0;
+                  return (
+                    <p className={`text-5xl font-bold leading-none ${isOver ? "text-red-500" : "text-green-700"}`}>
+                      {isOver ? `+${Math.abs(displayVal)}` : displayVal}
+                    </p>
+                  );
+                })()}
                 {summary.calorie_goal && (
                   <p className="text-sm text-gray-400 mt-1">
                     of {summary.calorie_goal} kcal goal

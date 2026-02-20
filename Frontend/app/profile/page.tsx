@@ -74,6 +74,7 @@ export default function ProfilePage() {
   } | null>(null);
   const [calculating, setCalculating] = useState(false);
   const [calcError, setCalcError] = useState("");
+  const [usedDefaultWeight, setUsedDefaultWeight] = useState(false);
 
   // Today's summary state
   const [todaySummary, setTodaySummary] = useState<{
@@ -233,6 +234,7 @@ export default function ProfilePage() {
       if (res.ok) {
         const goals = await res.json();
         setCalculatedGoals(goals);
+        if (goals.weight_lbs_used === 154) setUsedDefaultWeight(true);
         // Update the displayed goal inputs with the calculated values
         setCalorieGoal(String(goals.calorie_goal));
         setProteinGoal(String(goals.protein_goal));
@@ -514,6 +516,11 @@ export default function ProfilePage() {
               Goal: <span className="font-medium text-gray-600 capitalize">{goalType === "lose" ? "Lose weight" : goalType === "gain" ? "Build muscle" : "Maintain"}</span>
               {calculatedGoals ? ` · BMR ${calculatedGoals.bmr} · TDEE ${calculatedGoals.tdee} kcal` : ""}
             </p>
+            {usedDefaultWeight && (
+              <div className="mt-2 text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2">
+                Goals calculated using a default weight (154 lbs). Log your weight in the Weight section below for more accurate goals.
+              </div>
+            )}
           </div>
         </section>
       )}
@@ -775,35 +782,46 @@ export default function ProfilePage() {
       {weightHistory.length > 0 && (
         <section className="px-5 mt-4">
           <h2 className="text-lg font-bold text-green-900 mb-2">Weight Over Time</h2>
-          <div className="bg-white rounded-2xl p-4 shadow-sm">
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={weightHistory} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis
-                  dataKey="timestamp"
-                  tickFormatter={(t) => new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                  tick={{ fontSize: 11 }}
-                />
-                <YAxis
-                  domain={["auto", "auto"]}
-                  tick={{ fontSize: 11 }}
-                  tickFormatter={(v) => `${displayWeight(v)} ${unitLabel}`}
-                />
-                <Tooltip
-                  formatter={(v: any) => [`${displayWeight(v as number)} ${unitLabel}`, 'Weight']}
-                  labelFormatter={(t) => new Date(t).toLocaleDateString()}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="weight_lbs"
-                  stroke="#16a34a"
-                  strokeWidth={2}
-                  dot={{ r: 3 }}
-                  activeDot={{ r: 5 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+          {weightHistory.length === 1 ? (
+            <div className="bg-white rounded-2xl p-4 shadow-sm text-center">
+              <p className="text-sm font-semibold text-gray-700">
+                {displayWeight(weightHistory[0].weight_lbs)} {unitLabel}
+              </p>
+              <p className="text-xs text-gray-400 mt-1">
+                Log one more weight entry to see your trend.
+              </p>
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl p-4 shadow-sm">
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={weightHistory} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis
+                    dataKey="timestamp"
+                    tickFormatter={(t) => new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                    tick={{ fontSize: 11 }}
+                  />
+                  <YAxis
+                    domain={["auto", "auto"]}
+                    tick={{ fontSize: 11 }}
+                    tickFormatter={(v) => `${displayWeight(v)} ${unitLabel}`}
+                  />
+                  <Tooltip
+                    formatter={(v: any) => [`${displayWeight(v as number)} ${unitLabel}`, 'Weight']}
+                    labelFormatter={(t) => new Date(t).toLocaleDateString()}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="weight_lbs"
+                    stroke="#16a34a"
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                    activeDot={{ r: 5 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
 
           {/* Recent entries list */}
           <div className="mt-3 bg-white rounded-2xl p-4 shadow-sm">
