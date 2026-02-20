@@ -1,140 +1,83 @@
-echo "# 🥦 FoodEnough
+# FoodEnough
 
-**AI-powered food logging and nutrition tracking app.**
+Log what you eat by just describing it. No calorie databases, no barcode hunting — type "chicken rice and broccoli" and it figures out the rest.
 
-FoodEnough combines a **FastAPI backend (Python + SQLite + OpenAI)** with a **Next.js + TypeScript frontend** to let users log food naturally by describing what they ate — no manual calorie counting or barcode scanning required.
-
----
-
-## 🚀 Features
-
-- 🧠 **AI-Powered Logging:** Uses OpenAI to extract calories, protein, carbs, and fat from text descriptions.
-- 🧾 **Persistent Tracking:** Saves food logs locally via SQLite.
-- 📊 **Macro Summaries:** Daily and weekly breakdowns of calories and macros.
-- 📤 **Data Export:** Download logs as CSV for further analysis.
-- 🌐 **Frontend UI:** Clean, responsive interface built with Next.js & Tailwind.
+Built with FastAPI + Next.js. Uses GPT-4o-mini to parse food descriptions into macros.
 
 ---
 
-## 🧩 Project Structure
+## Stack
 
-\`\`\`
-FoodEnough/
-├── backend/ # FastAPI backend (Python)
-│ ├── main.py # API routes (log, save, export, etc.)
-│ ├── db.py # Database setup
-│ ├── requirements.txt # Backend dependencies
-│ └── .env.example # Environment template
-│
-├── frontend/ # Next.js + TypeScript frontend
-│ ├── app/ # Routes and pages (Diary, Export, etc.)
-│ ├── components/ # UI components (Form, Chart, Navbar)
-│ ├── styles/ # Global styles
-│ ├── package.json # Frontend dependencies
-│ └── tailwind.config.js # Tailwind setup
-│
-├── .gitignore
-├── .env.example
-└── README.md
-\`\`\`
+- **Backend** — FastAPI, SQLAlchemy, SQLite (Postgres-ready)
+- **Frontend** — Next.js 15, TypeScript, Tailwind CSS
+- **AI** — OpenAI GPT-4o-mini (text + photo logging)
+- **Auth** — JWT, bcrypt
 
 ---
 
-## 🧰 Local Setup
+## Running locally
 
-### 1️⃣ Clone the repository
+### Backend
 
-\`\`\`bash
-git clone https://github.com/<YOUR_USERNAME>/FoodEnough.git
-cd FoodEnough
-\`\`\`
-
-### 2️⃣ Backend Setup (FastAPI)
-
-\`\`\`bash
-cd backend
+```bash
+cd Backend
 python -m venv .venv
-.venv\Scripts\activate # macOS/Linux: source .venv/bin/activate
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 uvicorn main:app --reload
-\`\`\`
-Backend runs at **http://127.0.0.1:8000**
+```
 
-### 3️⃣ Frontend Setup (Next.js)
+Runs at `http://127.0.0.1:8000`
 
-\`\`\`bash
-cd frontend
+Create a `Backend/.env`:
+
+```
+OPENAI_API_KEY=your-key
+DATABASE_URL=sqlite:///./foodenough.db
+JWT_SECRET_KEY=your-secret
+CORS_ORIGINS=http://localhost:3000
+```
+
+### Frontend
+
+```bash
+cd Frontend
 npm install
 npm run dev
-\`\`\`
-Frontend runs at **http://localhost:3000**
+```
 
----
+Runs at `http://localhost:3000`
 
-## 🔐 Environment Variables
+Optionally create `Frontend/.env.local`:
 
-### Backend (.env)
-
-\`\`\`
-OPENAI_API_KEY=your-openai-key-here
-DATABASE_URL=sqlite:///./backend/foodenough.db
-\`\`\`
-
-### Frontend (.env.local)
-
-\`\`\`
+```
 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
-\`\`\`
+```
 
 ---
 
-## 🧠 Example Usage
+## Features
 
-\`\`\`bash
-curl -X POST http://127.0.0.1:8000/log -H \"Content-Type: application/json\" -d '{\"input_text\": \"2 eggs and toast with butter\"}'
-\`\`\`
-Response:
-\`\`\`json
-{
-\"result\": {
-\"total\": { \"calories\": 310, \"protein\": 16, \"carbs\": 20, \"fat\": 15 }
-}
-}
-\`\`\`
+- Text logging — describe a meal, get macros back
+- Photo logging — snap a picture, same result
+- Barcode scanning — scans via camera, pulls from Open Food Facts
+- Weekly diary with calorie chart
+- 6-week AI-generated workout plans
+- Weight tracking
+- CSV export
+- Password reset via email
 
 ---
 
-## 📦 Export Logs
+## Tests
 
-\`\`\`bash
-GET /logs/export
-\`\`\`
-Exports a CSV file with your logged meals.
-
----
-
-## 🧱 Tech Stack
-
-| Layer    | Technology                          |
-| -------- | ----------------------------------- |
-| Backend  | FastAPI + SQLAlchemy                |
-| Database | SQLite                              |
-| AI       | OpenAI GPT                          |
-| Frontend | Next.js 13 (App Router), TypeScript |
-| Styling  | Tailwind CSS                        |
+```bash
+cd Backend
+pytest test_main.py -v
+```
 
 ---
 
-## 🧑‍💻 Author
+## Author
 
-**Luke Vaughan**  
-Lead Data Scientist & Developer  
-📧 lukesheridanray@gmail.com  
-💼 [LinkedIn](https://www.linkedin.com/in/lukevaughan/)
-
----
-
-## 🪶 License
-
-Licensed under the MIT License — free to use, modify, and share.
-" > README.md
+Luke Vaughan — [lukesheridanray@gmail.com](mailto:lukesheridanray@gmail.com)
