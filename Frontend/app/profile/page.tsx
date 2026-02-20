@@ -166,7 +166,7 @@ export default function ProfilePage() {
       const tzOffset = -new Date().getTimezoneOffset();
       const summaryRes = await fetch(
         `${API_URL}/summary/today?tz_offset_minutes=${tzOffset}`,
-        { headers: { Authorization: `Bearer ${getToken()}` } }
+        { headers: authHeaders() }
       );
       if (summaryRes.ok) setTodaySummary(await summaryRes.json());
     } catch {

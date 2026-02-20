@@ -2,6 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { API_URL } from "../../lib/config";
+import { COMMON_HEADERS } from "../../lib/auth";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -16,7 +17,7 @@ export default function ForgotPasswordPage() {
     try {
       const res = await fetch(`${API_URL}/auth/forgot-password`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...COMMON_HEADERS },
         body: JSON.stringify({ email }),
       });
       if (!res.ok) {

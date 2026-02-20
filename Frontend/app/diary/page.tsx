@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getToken, removeToken } from "../../lib/auth";
+import { getToken, removeToken, authHeaders } from "../../lib/auth";
 import { API_URL } from "../../lib/config";
 import BottomNav from "../components/BottomNav";
 import {
@@ -79,7 +79,7 @@ export default function DiaryPage() {
       setLoading(true);
       try {
         const res = await fetch(`${API_URL}/logs/week?offset_days=${weekOffset * 7}`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: authHeaders(),
         });
 
         if (!res.ok) {

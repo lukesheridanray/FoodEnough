@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { setToken } from "../../lib/auth";
+import { setToken, COMMON_HEADERS } from "../../lib/auth";
 import { API_URL } from "../../lib/config";
 
 export default function SignupPage() {
@@ -28,7 +28,7 @@ export default function SignupPage() {
     try {
       const res = await fetch(`${API_URL}/auth/register`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...COMMON_HEADERS },
         body: JSON.stringify({ email, password }),
       });
       const data = await res.json();

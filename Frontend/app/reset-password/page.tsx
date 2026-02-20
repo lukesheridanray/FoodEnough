@@ -3,6 +3,7 @@ import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { API_URL } from "../../lib/config";
+import { COMMON_HEADERS } from "../../lib/auth";
 
 function ResetPasswordForm() {
   const [password, setPassword] = useState("");
@@ -33,7 +34,7 @@ function ResetPasswordForm() {
     try {
       const res = await fetch(`${API_URL}/auth/reset-password`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...COMMON_HEADERS },
         body: JSON.stringify({ token, new_password: password }),
       });
       const data = await res.json().catch(() => ({}));
