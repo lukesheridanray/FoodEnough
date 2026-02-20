@@ -303,7 +303,7 @@ export default function DiaryPage() {
               >
                 <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(value: number) => [`${value} kcal`, "Calories"]} />
+                <Tooltip formatter={(value) => [`${value ?? 0} kcal`, "Calories"]} />
                 <Bar dataKey="calories" fill="#16a34a" radius={[4, 4, 0, 0] as [number, number, number, number]}>
                   <LabelList dataKey="calories" position="top" style={{ fontSize: 10 }} />
                 </Bar>
