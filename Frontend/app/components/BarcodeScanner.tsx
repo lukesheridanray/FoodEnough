@@ -11,55 +11,121 @@ interface Props {
 export default function BarcodeScanner({ onDetected, onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [permissionError, setPermissionError] = useState(false);
+  const [permissionErrorMsg, setPermissionErrorMsg] = useState(
+    "Please allow camera access in your browser settings and try again."
+  );
   const controlsRef = useRef<IScannerControls | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const detectedRef = useRef(false);
 
-  // Keep a ref to the latest callback so the effect (which runs once) never
-  // captures a stale closure, and so changes to onDetected don't restart the
-  // camera stream.
   const onDetectedRef = useRef(onDetected);
   onDetectedRef.current = onDetected;
 
   useEffect(() => {
-    // Empty deps: start the camera exactly once when the modal mounts.
-    const reader = new BrowserMultiFormatReader();
     let mounted = true;
 
-    reader
-      .decodeFromVideoDevice(
-        undefined,
-        videoRef.current ?? undefined,
-        (result, _error, controls) => {
-          if (!mounted || detectedRef.current) return;
-          if (result) {
-            detectedRef.current = true;
-            controls.stop();
-            BrowserMultiFormatReader.releaseAllStreams();
-            onDetectedRef.current(result.getText());
-          }
+    function cleanup() {
+      controlsRef.current?.stop();
+      controlsRef.current = null;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      BrowserMultiFormatReader.releaseAllStreams();
+    }
+
+    async function start() {
+      // 1. Request the camera directly so we control the constraints.
+      //    Using `ideal` (not exact) means Chrome falls back to the front
+      //    webcam on desktops that have no "environment"-facing camera instead
+      //    of silently selecting an IR/depth sensor that produces black frames.
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+        });
+      } catch (err: unknown) {
+        if (!mounted) return;
+        const name = (err as { name?: string })?.name ?? "";
+        if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+          setPermissionErrorMsg(
+            "Please allow camera access in your browser settings and try again."
+          );
+        } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+          setPermissionErrorMsg("No camera was found on this device.");
+        } else if (name === "NotReadableError" || name === "TrackStartError") {
+          setPermissionErrorMsg(
+            "Camera is already in use by another application."
+          );
+        } else {
+          setPermissionErrorMsg(
+            "Could not access the camera. Please try again."
+          );
         }
-      )
-      .then((controls) => {
+        setPermissionError(true);
+        return;
+      }
+
+      if (!mounted) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+
+      streamRef.current = stream;
+
+      // 2. Attach stream to the video element and start playback.
+      const video = videoRef.current!;
+      video.srcObject = stream;
+      try {
+        await video.play();
+      } catch {
+        // play() can be interrupted during cleanup — ignore
+        if (!mounted) return;
+      }
+
+      if (!mounted) {
+        cleanup();
+        return;
+      }
+
+      // 3. Hand the already-playing video to ZXing for barcode decoding only.
+      //    decodeFromVideoElement skips getUserMedia (we did it above) and
+      //    just starts the decode loop on the element.
+      const reader = new BrowserMultiFormatReader();
+      try {
+        const controls = await reader.decodeFromVideoElement(
+          video,
+          (result, _error) => {
+            if (!mounted || detectedRef.current) return;
+            if (result) {
+              detectedRef.current = true;
+              cleanup();
+              onDetectedRef.current(result.getText());
+            }
+          }
+        );
+
         if (!mounted) {
           controls.stop();
-          BrowserMultiFormatReader.releaseAllStreams();
+          cleanup();
         } else {
           controlsRef.current = controls;
         }
-      })
-      .catch((err: Error) => {
+      } catch {
         if (!mounted) return;
-        if (err?.name === "NotAllowedError") {
-          setPermissionError(true);
-        } else {
-          setPermissionError(true);
-        }
-      });
+        setPermissionErrorMsg("Could not start the barcode scanner. Please try again.");
+        setPermissionError(true);
+        cleanup();
+      }
+    }
+
+    start();
 
     return () => {
       mounted = false;
-      controlsRef.current?.stop();
-      BrowserMultiFormatReader.releaseAllStreams();
+      cleanup();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -78,10 +144,8 @@ export default function BarcodeScanner({ onDetected, onClose }: Props) {
         {permissionError ? (
           <div className="bg-white rounded-2xl p-6 text-center space-y-3">
             <div className="text-4xl">📷</div>
-            <p className="text-gray-800 font-semibold">Camera access denied</p>
-            <p className="text-gray-500 text-sm">
-              Please allow camera access in your browser settings and try again.
-            </p>
+            <p className="text-gray-800 font-semibold">Camera unavailable</p>
+            <p className="text-gray-500 text-sm">{permissionErrorMsg}</p>
             <button
               onClick={onClose}
               className="mt-2 px-5 py-2 bg-green-600 text-white rounded-xl text-sm font-medium"
@@ -94,6 +158,7 @@ export default function BarcodeScanner({ onDetected, onClose }: Props) {
             <video
               ref={videoRef}
               className="w-full h-full object-cover"
+              autoPlay
               muted
               playsInline
             />

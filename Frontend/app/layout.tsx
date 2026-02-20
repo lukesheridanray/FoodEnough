@@ -8,6 +8,12 @@ export const metadata = {
   description: "Track your food and workouts naturally",
 };
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
+
 export default function RootLayout({
   children,
 }: {

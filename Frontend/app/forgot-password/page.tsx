@@ -1,19 +1,20 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
+import { API_URL } from "../../lib/config";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      const res = await fetch(`${apiUrl}/auth/forgot-password`, {
+      const res = await fetch(`${API_URL}/auth/forgot-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
@@ -25,7 +26,7 @@ export default function ForgotPasswordPage() {
       }
       setSubmitted(true);
     } catch {
-      setError("Network error. Is the backend running?");
+      setError("Connection failed. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -42,12 +43,12 @@ export default function ForgotPasswordPage() {
             <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-sm text-green-800">
               If <span className="font-medium">{email}</span> is registered, a reset link has been sent. Check your inbox (and spam folder).
             </div>
-            <a
+            <Link
               href="/login"
               className="block w-full py-2 text-center bg-gradient-to-r from-green-600 to-green-500 text-white rounded-xl shadow-md hover:shadow-lg transition-all text-sm font-medium"
             >
               Back to Login
-            </a>
+            </Link>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -71,9 +72,9 @@ export default function ForgotPasswordPage() {
             >
               {loading ? "Sending…" : "Send Reset Link"}
             </button>
-            <a href="/login" className="block text-center text-sm text-gray-500 hover:underline">
+            <Link href="/login" className="block text-center text-sm text-gray-500 hover:underline">
               Back to Login
-            </a>
+            </Link>
           </form>
         )}
       </div>

@@ -1,7 +1,9 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { setToken } from "../../lib/auth";
+import { API_URL } from "../../lib/config";
 
 export default function SignupPage() {
   const [email, setEmail] = useState("");
@@ -10,7 +12,6 @@ export default function SignupPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,7 +26,7 @@ export default function SignupPage() {
     }
     setLoading(true);
     try {
-      const res = await fetch(`${apiUrl}/auth/register`, {
+      const res = await fetch(`${API_URL}/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
@@ -38,7 +39,7 @@ export default function SignupPage() {
       setToken(data.access_token);
       router.push("/");
     } catch {
-      setError("Network error. Is the backend running?");
+      setError("Connection failed. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -94,9 +95,9 @@ export default function SignupPage() {
         </form>
         <p className="text-sm text-center text-gray-500 mt-4">
           Already have an account?{" "}
-          <a href="/login" className="text-green-700 font-medium hover:underline">
+          <Link href="/login" className="text-green-700 font-medium hover:underline">
             Log in
-          </a>
+          </Link>
         </p>
       </div>
     </div>

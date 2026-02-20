@@ -5,14 +5,14 @@
 # All food log endpoints are protected and scoped per user.
 # ============================================================
 
-from fastapi import FastAPI, Depends, HTTPException, Request, File, UploadFile
+from fastapi import FastAPI, Depends, HTTPException, Query, Request, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import create_engine, Column, Integer, Float, DateTime, Text, String, ForeignKey, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
@@ -26,6 +26,10 @@ from io import StringIO
 import re
 import sys
 import base64
+import smtplib
+import ssl
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -35,6 +39,9 @@ from slowapi.errors import RateLimitExceeded
 # Environment
 # ============================================================
 load_dotenv()
+
+with open("prompt_template.txt", "r", encoding="utf-8") as _f:
+    _PROMPT_TEMPLATE = _f.read()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-this-in-production")
@@ -51,8 +58,14 @@ limiter = Limiter(key_func=get_remote_address)
 # ============================================================
 # Database
 # ============================================================
-SQLALCHEMY_DATABASE_URL = "sqlite:///./foodenough.db"
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./foodenough.db")
+
+# SQLite requires check_same_thread=False; PostgreSQL does not accept it
+_engine_kwargs: dict = {}
+if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+    _engine_kwargs["connect_args"] = {"check_same_thread": False}
+
+engine = create_engine(SQLALCHEMY_DATABASE_URL, **_engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -233,12 +246,57 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def create_access_token(user_id: int) -> str:
-    expire = datetime.utcnow() + timedelta(minutes=JWT_EXPIRE_MINUTES)
+    expire = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=JWT_EXPIRE_MINUTES)
     return jwt.encode(
         {"sub": str(user_id), "exp": expire},
         JWT_SECRET_KEY,
         algorithm=JWT_ALGORITHM,
     )
+
+
+def send_password_reset_email(to_email: str, reset_url: str) -> bool:
+    """Send a password reset email via SMTP. Returns True if sent, False if SMTP is not configured."""
+    smtp_host = os.getenv("SMTP_HOST")
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_user = os.getenv("SMTP_USER")
+    smtp_password = os.getenv("SMTP_PASSWORD")
+    smtp_from = os.getenv("SMTP_FROM") or smtp_user
+
+    if not all([smtp_host, smtp_user, smtp_password]):
+        return False
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = "Reset your FoodEnough password"
+    msg["From"] = smtp_from
+    msg["To"] = to_email
+
+    text_body = (
+        f"Click the link below to reset your FoodEnough password:\n\n"
+        f"{reset_url}\n\n"
+        f"This link expires in 1 hour. If you didn't request this, you can safely ignore this email."
+    )
+    html_body = f"""<html><body style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">
+<h2 style="color:#15803d">🌿 FoodEnough</h2>
+<p>Click the button below to reset your password:</p>
+<p><a href="{reset_url}" style="display:inline-block;padding:12px 24px;background:#16a34a;color:#fff;text-decoration:none;border-radius:8px;font-weight:600">Reset Password</a></p>
+<p style="color:#6b7280;font-size:13px">Or copy this link:<br><a href="{reset_url}" style="color:#16a34a">{reset_url}</a></p>
+<p style="color:#6b7280;font-size:13px">This link expires in 1 hour. If you didn't request a password reset, you can safely ignore this email.</p>
+</body></html>"""
+
+    msg.attach(MIMEText(text_body, "plain"))
+    msg.attach(MIMEText(html_body, "html"))
+
+    try:
+        context = ssl.create_default_context()
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.ehlo()
+            server.starttls(context=context)
+            server.login(smtp_user, smtp_password)
+            server.sendmail(smtp_from, to_email, msg.as_string())
+        return True
+    except Exception as e:
+        print(f"[EMAIL] Failed to send reset email to {to_email}: {e}", file=sys.stderr, flush=True)
+        return False
 
 
 # ============================================================
@@ -483,16 +541,15 @@ def forgot_password(request: Request, data: ForgotPasswordInput, db: Session = D
     reset = PasswordResetToken(
         email=email,
         token=token,
-        expires_at=datetime.utcnow() + timedelta(hours=1),
+        expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1),
     )
     db.add(reset)
     db.commit()
 
-    # Dev mode: log the token so it can be used without an email server.
-    # Replace this block with actual email sending before going to production.
     reset_url = f"{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/reset-password?token={token}"
-    print(f"\n[DEV] Password reset requested for {email}")
-    print(f"[DEV] Reset URL: {reset_url}\n", flush=True)
+    sent = send_password_reset_email(email, reset_url)
+    if not sent:
+        print(f"\n[DEV] Password reset URL for {email}:\n{reset_url}\n", flush=True)
 
     return generic
 
@@ -508,7 +565,7 @@ def reset_password(request: Request, data: ResetPasswordInput, db: Session = Dep
     if not record:
         raise HTTPException(status_code=400, detail="Invalid or expired reset token.")
 
-    if datetime.utcnow() > record.expires_at:
+    if datetime.now(timezone.utc).replace(tzinfo=None) > record.expires_at:
         record.used = 1
         db.commit()
         raise HTTPException(status_code=400, detail="Reset token has expired. Please request a new one.")
@@ -525,41 +582,29 @@ def reset_password(request: Request, data: ResetPasswordInput, db: Session = Dep
 
 
 # ============================================================
-# POST /log  — parse food but do not save (protected)
+# DELETE /auth/account  — permanently delete account and all data
 # ============================================================
-@app.post("/log")
-@limiter.limit("30/minute")
-def get_macros_from_input(
+@app.delete("/auth/account")
+@limiter.limit("3/minute")
+def delete_account(
     request: Request,
-    data: FoodInput,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    try:
-        with open("prompt_template.txt", "r", encoding="utf-8") as f:
-            base_prompt = f.read()
+    """Permanently delete the current user's account and all their data."""
+    user_id = current_user.id
+    email = current_user.email
 
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": base_prompt},
-                {"role": "user", "content": data.input_text},
-            ],
-            temperature=0.3,
-        )
-
-        ai_reply = response.choices[0].message.content
-
-        try:
-            parsed = extract_json(ai_reply)
-            return {"result": parsed}
-        except Exception:
-            return {"raw_output": ai_reply, "warning": "Could not parse clean JSON"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        print("/log error:", e)
-        raise HTTPException(status_code=500, detail="An internal error occurred")
+    db.query(FoodLog).filter(FoodLog.user_id == user_id).delete()
+    db.query(Workout).filter(Workout.user_id == user_id).delete()
+    db.query(WeightEntry).filter(WeightEntry.user_id == user_id).delete()
+    db.query(FitnessProfile).filter(FitnessProfile.user_id == user_id).delete()
+    # WorkoutPlan has cascade="all, delete-orphan" on sessions, so deleting plans removes sessions
+    db.query(WorkoutPlan).filter(WorkoutPlan.user_id == user_id).delete()
+    db.query(PasswordResetToken).filter(PasswordResetToken.email == email).delete()
+    db.delete(current_user)
+    db.commit()
+    return {"status": "deleted"}
 
 
 # ============================================================
@@ -574,8 +619,7 @@ def save_log(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        with open("prompt_template.txt", "r", encoding="utf-8") as f:
-            base_prompt = f.read()
+        base_prompt = _PROMPT_TEMPLATE
 
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -633,6 +677,54 @@ def delete_log(
     db.delete(log)
     db.commit()
     return {"status": "deleted"}
+
+
+# ============================================================
+# PUT /logs/{log_id}  — edit a food log entry (protected)
+# ============================================================
+@app.put("/logs/{log_id}")
+@limiter.limit("20/minute")
+def update_log(
+    request: Request,
+    log_id: int,
+    data: FoodInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    log = db.query(FoodLog).filter(FoodLog.id == log_id, FoodLog.user_id == current_user.id).first()
+    if not log:
+        raise HTTPException(status_code=404, detail="Log not found")
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": _PROMPT_TEMPLATE},
+                {"role": "user", "content": data.input_text},
+            ],
+            temperature=0.3,
+        )
+        ai_reply = response.choices[0].message.content
+        try:
+            parsed = extract_json(ai_reply)
+            total = parsed["total"]
+        except Exception:
+            raise HTTPException(status_code=500, detail="AI response was not valid JSON")
+
+        log.input_text = data.input_text
+        log.parsed_json = json.dumps(parsed)
+        log.calories = total["calories"]
+        log.protein = total["protein"]
+        log.carbs = total["carbs"]
+        log.fat = total["fat"]
+        db.commit()
+        db.refresh(log)
+        return {"status": "success", "entry_id": log.id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"PUT /logs/{log_id} error:", e)
+        raise HTTPException(status_code=500, detail="An internal error occurred")
 
 
 # ============================================================
@@ -836,13 +928,17 @@ def save_parsed_log(
 def get_logs_today(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    tz_offset_minutes: int = Query(default=0, ge=-720, le=840),
 ):
-    now = datetime.utcnow()
-    start = datetime(now.year, now.month, now.day)
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    local_now = now_utc + timedelta(minutes=tz_offset_minutes)
+    local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    utc_start = local_midnight - timedelta(minutes=tz_offset_minutes)
+    utc_end = utc_start + timedelta(days=1)
 
     logs = (
         db.query(FoodLog)
-        .filter(FoodLog.user_id == current_user.id, FoodLog.timestamp >= start)
+        .filter(FoodLog.user_id == current_user.id, FoodLog.timestamp >= utc_start, FoodLog.timestamp < utc_end)
         .order_by(FoodLog.timestamp.desc())
         .all()
     )
@@ -868,15 +964,21 @@ def get_logs_today(
 # ============================================================
 @app.get("/logs/week")
 def get_logs_week(
+    offset_days: int = Query(default=0, ge=0, le=365),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    now = datetime.utcnow()
-    start = now - timedelta(days=7)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    end = now - timedelta(days=offset_days)
+    start = end - timedelta(days=7)
 
     logs = (
         db.query(FoodLog)
-        .filter(FoodLog.user_id == current_user.id, FoodLog.timestamp >= start)
+        .filter(
+            FoodLog.user_id == current_user.id,
+            FoodLog.timestamp >= start,
+            FoodLog.timestamp < end,
+        )
         .order_by(FoodLog.timestamp.desc())
         .all()
     )
@@ -1091,79 +1193,30 @@ def delete_workout(
 
 
 # ============================================================
-# POST /workouts/generate  — AI workout generation
-# ============================================================
-@app.post("/workouts/generate")
-@limiter.limit("10/minute")
-def generate_workout(
-    request: Request,
-    data: WorkoutGenerateInput,
-    current_user: User = Depends(get_current_user),
-):
-    equipment_line = f"Available equipment: {data.available_equipment}." if data.available_equipment else "Assume bodyweight or standard gym equipment."
-    duration_line = f"Target duration: {data.duration_minutes} minutes." if data.duration_minutes else ""
-
-    prompt = f"""You are an expert personal trainer. Generate a workout plan as a valid JSON object.
-
-Goal: {data.goal}
-{equipment_line}
-{duration_line}
-
-Return ONLY valid JSON in this exact format:
-{{
-  "name": "Workout name (e.g. Push Day, Full Body HIIT)",
-  "exercises": [
-    {{"name": "Exercise name", "sets": 3, "reps": "10-12", "rest_seconds": 60, "notes": "optional tip"}},
-    ...
-  ],
-  "total_duration_minutes": 45,
-  "notes": "Any overall notes about the workout"
-}}
-
-Rules:
-- Return ONLY valid JSON, no markdown, no code fences, no extra text.
-- Include 4-8 exercises appropriate for the goal.
-- Be specific with exercise names.
-- Rest periods should match the goal (shorter for cardio/HIIT, longer for strength).
-"""
-
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-        )
-        ai_reply = response.choices[0].message.content
-        try:
-            parsed = extract_json(ai_reply)
-            return {"workout": parsed}
-        except Exception:
-            return {"raw_output": ai_reply, "warning": "Could not parse clean JSON"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        print("/workouts/generate error:", e)
-        raise HTTPException(status_code=500, detail="An internal error occurred")
-
-
-# ============================================================
 # GET /summary/today  — real data for Today's Summary cards
 # ============================================================
 @app.get("/summary/today")
 def get_today_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    tz_offset_minutes: int = Query(default=0, ge=-720, le=840),
 ):
-    now = datetime.utcnow()
-    start_of_day = datetime(now.year, now.month, now.day)
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    local_now = now_utc + timedelta(minutes=tz_offset_minutes)
+    local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    utc_start = local_midnight - timedelta(minutes=tz_offset_minutes)
+    utc_end = utc_start + timedelta(days=1)
 
-    # Today's calories from food logs
+    # Today's food logs
     today_logs = (
         db.query(FoodLog)
-        .filter(FoodLog.user_id == current_user.id, FoodLog.timestamp >= start_of_day)
+        .filter(FoodLog.user_id == current_user.id, FoodLog.timestamp >= utc_start, FoodLog.timestamp < utc_end)
         .all()
     )
     calories_today = sum(log.calories or 0 for log in today_logs)
+    protein_today = sum(log.protein or 0 for log in today_logs)
+    carbs_today = sum(log.carbs or 0 for log in today_logs)
+    fat_today = sum(log.fat or 0 for log in today_logs)
 
     # Calories remaining vs goal
     calorie_goal = current_user.calorie_goal
@@ -1189,6 +1242,12 @@ def get_today_summary(
         "calories_today": round(calories_today),
         "calorie_goal": calorie_goal,
         "calories_remaining": round(calories_remaining) if calories_remaining is not None else None,
+        "protein_today": round(protein_today),
+        "carbs_today": round(carbs_today),
+        "fat_today": round(fat_today),
+        "protein_goal": current_user.protein_goal,
+        "carbs_goal": current_user.carbs_goal,
+        "fat_goal": current_user.fat_goal,
         "latest_weight_lbs": latest_weight.weight_lbs if latest_weight else None,
         "latest_workout_name": latest_workout.name if latest_workout else None,
     }
@@ -1238,7 +1297,7 @@ def update_fitness_profile(
     profile.days_per_week = data.days_per_week
     profile.session_duration_minutes = data.session_duration_minutes
     profile.limitations = data.limitations
-    profile.updated_at = datetime.utcnow()
+    profile.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
     db.commit()
     return {"status": "success"}
 
@@ -1488,6 +1547,6 @@ def complete_plan_session(
     if session.is_completed:
         return {"status": "already_completed"}
     session.is_completed = 1
-    session.completed_at = datetime.utcnow()
+    session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
     db.commit()
     return {"status": "completed"}

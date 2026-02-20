@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { getToken, removeToken, authHeaders } from "../../lib/auth";
+import { API_URL } from "../../lib/config";
 import BottomNav from "../components/BottomNav";
 import {
   LineChart,
@@ -13,6 +14,7 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
+import { LogOut } from "lucide-react";
 
 interface Profile {
   email: string;
@@ -30,7 +32,6 @@ interface WeightEntry {
 
 export default function ProfilePage() {
   const router = useRouter();
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -51,6 +52,20 @@ export default function ProfilePage() {
   const [weightSuccess, setWeightSuccess] = useState(false);
   const [weightHistory, setWeightHistory] = useState<WeightEntry[]>([]);
   const [weightHistoryError, setWeightHistoryError] = useState("");
+  const [weightUnit, setWeightUnit] = useState<'lbs' | 'kg'>(() => {
+    if (typeof window === 'undefined') return 'lbs';
+    return (localStorage.getItem('weightUnit') as 'lbs' | 'kg') ?? 'lbs';
+  });
+
+  const toggleWeightUnit = (unit: 'lbs' | 'kg') => {
+    setWeightUnit(unit);
+    localStorage.setItem('weightUnit', unit);
+  };
+
+  // Delete account state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [deleteAccountError, setDeleteAccountError] = useState("");
 
   const handleUnauthorized = () => {
     removeToken();
@@ -66,7 +81,7 @@ export default function ProfilePage() {
 
   const loadProfile = async () => {
     try {
-      const res = await fetch(`${apiUrl}/profile`, { headers: authHeaders() });
+      const res = await fetch(`${API_URL}/profile`, { headers: authHeaders() });
       if (res.status === 401) { handleUnauthorized(); return; }
       const data: Profile = await res.json();
       setProfile(data);
@@ -81,7 +96,7 @@ export default function ProfilePage() {
 
   const loadWeightHistory = async () => {
     try {
-      const res = await fetch(`${apiUrl}/weight/history`, { headers: authHeaders() });
+      const res = await fetch(`${API_URL}/weight/history`, { headers: authHeaders() });
       if (res.status === 401) { handleUnauthorized(); return; }
       if (!res.ok) { setWeightHistoryError("Failed to load weight history."); return; }
       const data = await res.json();
@@ -109,7 +124,7 @@ export default function ProfilePage() {
         carbs_goal: carbsGoal ? parseInt(carbsGoal) : null,
         fat_goal: fatGoal ? parseInt(fatGoal) : null,
       };
-      const res = await fetch(`${apiUrl}/profile`, {
+      const res = await fetch(`${API_URL}/profile`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify(body),
@@ -124,7 +139,7 @@ export default function ProfilePage() {
         setGoalsError(parseApiError(err.detail) || "Failed to save goals.");
       }
     } catch {
-      setGoalsError("Network error. Is the backend running?");
+      setGoalsError("Connection failed. Please try again.");
     } finally {
       setSavingGoals(false);
     }
@@ -134,14 +149,15 @@ export default function ProfilePage() {
     e.preventDefault();
     const val = parseFloat(weightInput);
     if (!weightInput || isNaN(val)) return;
+    const lbs = weightUnit === 'kg' ? parseFloat((val * 2.20462).toFixed(1)) : val;
     setWeightError("");
     setWeightSuccess(false);
     setLoggingWeight(true);
     try {
-      const res = await fetch(`${apiUrl}/weight`, {
+      const res = await fetch(`${API_URL}/weight`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ weight_lbs: val }),
+        body: JSON.stringify({ weight_lbs: lbs }),
       });
       if (res.status === 401) { handleUnauthorized(); return; }
       if (res.ok) {
@@ -154,11 +170,40 @@ export default function ProfilePage() {
         setWeightError(parseApiError(err.detail) || "Failed to log weight.");
       }
     } catch {
-      setWeightError("Network error. Is the backend running?");
+      setWeightError("Connection failed. Please try again.");
     } finally {
       setLoggingWeight(false);
     }
   };
+
+  const handleDeleteAccount = async () => {
+    setDeleteAccountError("");
+    setDeletingAccount(true);
+    try {
+      const res = await fetch(`${API_URL}/auth/account`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      if (res.ok) {
+        removeToken();
+        router.push("/login");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setDeleteAccountError(err.detail || "Failed to delete account. Please try again.");
+        setShowDeleteConfirm(false);
+      }
+    } catch {
+      setDeleteAccountError("Connection failed. Please try again.");
+      setShowDeleteConfirm(false);
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
+
+  const displayWeight = (lbs: number) =>
+    weightUnit === 'kg' ? (lbs / 2.20462).toFixed(1) : lbs.toString();
+
+  const unitLabel = weightUnit === 'kg' ? 'kg' : 'lb';
 
   if (loading) return <div className="p-6 text-gray-500">Loading…</div>;
 
@@ -230,7 +275,27 @@ export default function ProfilePage() {
 
       {/* Weight Logging */}
       <section className="px-5 mt-4">
-        <h2 className="text-lg font-bold text-green-900 mb-2">Log Weight</h2>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-lg font-bold text-green-900">Log Weight</h2>
+          <div className="flex rounded-lg border border-green-200 overflow-hidden text-sm">
+            <button
+              onClick={() => toggleWeightUnit('lbs')}
+              className={`px-3 py-1 font-medium transition-colors ${
+                weightUnit === 'lbs' ? 'bg-green-600 text-white' : 'text-green-700 hover:bg-green-50'
+              }`}
+            >
+              lbs
+            </button>
+            <button
+              onClick={() => toggleWeightUnit('kg')}
+              className={`px-3 py-1 font-medium transition-colors ${
+                weightUnit === 'kg' ? 'bg-green-600 text-white' : 'text-green-700 hover:bg-green-50'
+              }`}
+            >
+              kg
+            </button>
+          </div>
+        </div>
         <form onSubmit={handleLogWeight} className="bg-white rounded-2xl p-4 shadow-sm">
           <div className="flex gap-2 items-center">
             <input
@@ -238,7 +303,7 @@ export default function ProfilePage() {
               step="0.1"
               value={weightInput}
               onChange={(e) => setWeightInput(e.target.value)}
-              placeholder="Weight in lbs"
+              placeholder={`Weight in ${unitLabel}`}
               className="flex-1 border border-green-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
             />
             <button
@@ -270,10 +335,10 @@ export default function ProfilePage() {
                 <YAxis
                   domain={["auto", "auto"]}
                   tick={{ fontSize: 11 }}
-                  tickFormatter={(v) => `${v} lb`}
+                  tickFormatter={(v) => `${displayWeight(v)} ${unitLabel}`}
                 />
                 <Tooltip
-                  formatter={(v: any) => [`${v} lb`, "Weight"]}
+                  formatter={(v: any) => [`${displayWeight(v as number)} ${unitLabel}`, 'Weight']}
                   labelFormatter={(t) => new Date(t).toLocaleDateString()}
                 />
                 <Line
@@ -297,7 +362,7 @@ export default function ProfilePage() {
                   <span className="text-gray-500">
                     {new Date(e.timestamp).toLocaleDateString()}
                   </span>
-                  <span className="font-semibold text-green-700">{e.weight_lbs} lb</span>
+                  <span className="font-semibold text-green-700">{displayWeight(e.weight_lbs)} {unitLabel}</span>
                 </li>
               ))}
             </ul>
@@ -316,6 +381,54 @@ export default function ProfilePage() {
           <p className="text-gray-400 text-sm">No weight entries yet. Log your first one above.</p>
         </section>
       )}
+
+      <section className="px-5 mt-6 pb-4">
+        <button
+          onClick={() => { removeToken(); router.push("/login"); }}
+          className="w-full py-2 flex items-center justify-center gap-2 text-sm text-red-500 border border-red-200 rounded-xl hover:bg-red-50 transition-colors"
+        >
+          <LogOut className="w-4 h-4" />
+          Log Out
+        </button>
+      </section>
+
+      {/* Delete Account */}
+      <section className="px-5 mt-3 pb-4">
+        {!showDeleteConfirm ? (
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="w-full py-2 text-sm text-gray-400 hover:text-red-500 transition-colors"
+          >
+            Delete account
+          </button>
+        ) : (
+          <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
+            <p className="text-sm text-gray-700 font-medium">Delete your account?</p>
+            <p className="text-xs text-gray-500">
+              This will permanently delete your account and all your data — food logs, workouts, weight entries, and goals. This cannot be undone.
+            </p>
+            {deleteAccountError && (
+              <p className="text-red-500 text-xs">{deleteAccountError}</p>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setShowDeleteConfirm(false); setDeleteAccountError(""); }}
+                disabled={deletingAccount}
+                className="flex-1 py-2 text-sm rounded-xl border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteAccount}
+                disabled={deletingAccount}
+                className="flex-1 py-2 text-sm rounded-xl bg-red-500 text-white hover:bg-red-600 disabled:opacity-60 font-medium"
+              >
+                {deletingAccount ? "Deleting…" : "Yes, delete"}
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
 
       <BottomNav />
     </div>

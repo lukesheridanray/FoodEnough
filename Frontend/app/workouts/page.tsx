@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { getToken, removeToken, authHeaders } from "../../lib/auth";
+import { API_URL } from "../../lib/config";
 import BottomNav from "../components/BottomNav";
 import { CheckCircle2, Circle, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 
@@ -116,7 +117,6 @@ function getDayLabel(dayNumber: number, daysPerWeek: number): string {
 
 export default function WorkoutsPage() {
   const router = useRouter();
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
   // Data
   const [loading, setLoading] = useState(true);
@@ -141,6 +141,7 @@ export default function WorkoutsPage() {
   const [completingSession, setCompletingSession] = useState<number | null>(null);
   const [abandoningPlan, setAbandoningPlan] = useState(false);
   const [abandonError, setAbandonError] = useState("");
+  const [showAbandonConfirm, setShowAbandonConfirm] = useState(false);
 
   // Quick log
   const [quickLogOpen, setQuickLogOpen] = useState(false);
@@ -164,7 +165,7 @@ export default function WorkoutsPage() {
 
   const loadActivePlan = async () => {
     try {
-      const res = await fetch(`${apiUrl}/workout-plans/active`, { headers: authHeaders() });
+      const res = await fetch(`${API_URL}/workout-plans/active`, { headers: authHeaders() });
       if (res.status === 401) { handleUnauthorized(); return; }
       const data = await res.json();
       if (data.plan) {
@@ -183,8 +184,8 @@ export default function WorkoutsPage() {
     const init = async () => {
       try {
         const [profileRes, planRes] = await Promise.all([
-          fetch(`${apiUrl}/fitness-profile`, { headers: authHeaders() }),
-          fetch(`${apiUrl}/workout-plans/active`, { headers: authHeaders() }),
+          fetch(`${API_URL}/fitness-profile`, { headers: authHeaders() }),
+          fetch(`${API_URL}/workout-plans/active`, { headers: authHeaders() }),
         ]);
         if (profileRes.status === 401) { handleUnauthorized(); return; }
         if (planRes.status === 401) { handleUnauthorized(); return; }
@@ -228,7 +229,7 @@ export default function WorkoutsPage() {
     setProfileError("");
     try {
       const body = { ...quizAnswers, limitations: limitations.trim() || null };
-      const res = await fetch(`${apiUrl}/fitness-profile`, {
+      const res = await fetch(`${API_URL}/fitness-profile`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify(body),
@@ -242,7 +243,7 @@ export default function WorkoutsPage() {
         setProfileError("Failed to save preferences. Please try again.");
       }
     } catch {
-      setProfileError("Network error. Is the backend running?");
+      setProfileError("Connection failed. Please try again.");
     } finally {
       setSavingProfile(false);
     }
@@ -254,7 +255,7 @@ export default function WorkoutsPage() {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 120_000); // 2-min hard cap
     try {
-      const res = await fetch(`${apiUrl}/workout-plans/generate`, {
+      const res = await fetch(`${API_URL}/workout-plans/generate`, {
         method: "POST",
         headers: authHeaders(),
         signal: controller.signal,
@@ -272,7 +273,7 @@ export default function WorkoutsPage() {
       if (err?.name === "AbortError") {
         setPlanError("Generation timed out. Please try again.");
       } else {
-        setPlanError("Network error. Is the backend running?");
+        setPlanError("Connection failed. Please try again.");
       }
     } finally {
       setGeneratingPlan(false);
@@ -282,7 +283,7 @@ export default function WorkoutsPage() {
   const handleCompleteSession = async (sessionId: number) => {
     setCompletingSession(sessionId);
     try {
-      const res = await fetch(`${apiUrl}/plan-sessions/${sessionId}/complete`, {
+      const res = await fetch(`${API_URL}/plan-sessions/${sessionId}/complete`, {
         method: "PUT",
         headers: authHeaders(),
       });
@@ -316,22 +317,22 @@ export default function WorkoutsPage() {
 
   const handleAbandonPlan = async () => {
     if (!activePlan) return;
-    if (!confirm("Abandon this plan? You can generate a new one at any time.")) return;
     setAbandoningPlan(true);
     setAbandonError("");
     try {
-      const res = await fetch(`${apiUrl}/workout-plans/${activePlan.id}`, {
+      const res = await fetch(`${API_URL}/workout-plans/${activePlan.id}`, {
         method: "DELETE",
         headers: authHeaders(),
       });
       if (res.status === 401) { handleUnauthorized(); return; }
       if (res.ok) {
         setActivePlan(null);
+        setShowAbandonConfirm(false);
       } else {
         setAbandonError("Failed to abandon plan. Please try again.");
       }
     } catch {
-      setAbandonError("Network error. Please try again.");
+      setAbandonError("Connection failed. Please try again.");
     } finally {
       setAbandoningPlan(false);
     }
@@ -344,7 +345,7 @@ export default function WorkoutsPage() {
     setManualSuccess(false);
     setLoggingManual(true);
     try {
-      const res = await fetch(`${apiUrl}/workouts`, {
+      const res = await fetch(`${API_URL}/workouts`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ name: manualName.trim(), notes: manualNotes.trim() || null }),
@@ -359,7 +360,7 @@ export default function WorkoutsPage() {
         setManualError("Failed to log workout.");
       }
     } catch {
-      setManualError("Network error. Is the backend running?");
+      setManualError("Connection failed. Please try again.");
     } finally {
       setLoggingManual(false);
     }
@@ -375,7 +376,7 @@ export default function WorkoutsPage() {
 
     return (
       <div className="min-h-screen bg-gradient-to-b from-green-100 to-green-50 pb-24">
-        <div className="h-6" />
+        <div style={{ height: 'max(24px, env(safe-area-inset-top))' }} />
         <header className="px-5 py-3">
           <h1 className="text-xl font-bold text-green-900">Let's build your plan</h1>
           <p className="text-sm text-gray-500">Answer a few questions to personalize your 6-week program</p>
@@ -465,7 +466,7 @@ export default function WorkoutsPage() {
   if (!activePlan) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-green-100 to-green-50 pb-24">
-        <div className="h-6" />
+        <div style={{ height: 'max(24px, env(safe-area-inset-top))' }} />
         <header className="px-5 py-3">
           <h1 className="text-xl font-bold text-green-900">Workouts</h1>
         </header>
@@ -491,11 +492,11 @@ export default function WorkoutsPage() {
           </section>
         )}
 
-        <section className="px-5 mt-8 text-center">
-          <div className="text-5xl mb-3">🗓</div>
-          <h2 className="text-lg font-bold text-green-900 mb-1">No active plan</h2>
-          <p className="text-sm text-gray-500 mb-5">
-            Generate a personalized 6-week program that builds week over week
+        <section className="px-5 mt-6 text-center">
+          <div className="text-6xl mb-3">🏋️</div>
+          <h2 className="text-xl font-bold text-green-900 mb-2">Ready to train?</h2>
+          <p className="text-sm text-gray-500 mb-5 max-w-xs mx-auto">
+            Get a personalized 6-week program tailored to your goals and schedule.
           </p>
           {planError && <p className="text-red-500 text-sm mb-3">{planError}</p>}
           <button
@@ -565,7 +566,7 @@ export default function WorkoutsPage() {
   if (activePlan.weeks.length === 0) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-green-100 to-green-50 pb-24">
-        <div className="h-6" />
+        <div style={{ height: 'max(24px, env(safe-area-inset-top))' }} />
         <header className="px-5 py-3">
           <h1 className="text-xl font-bold text-green-900">Workouts</h1>
         </header>
@@ -597,7 +598,7 @@ export default function WorkoutsPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-green-100 to-green-50 pb-24">
-      <div className="h-6" />
+      <div style={{ height: 'max(24px, env(safe-area-inset-top))' }} />
       <header className="px-5 py-3">
         <h1 className="text-xl font-bold text-green-900">Workouts</h1>
       </header>
@@ -612,14 +613,37 @@ export default function WorkoutsPage() {
                 <p className="text-xs text-gray-500 mt-0.5">{activePlan.notes}</p>
               )}
             </div>
-            <button
-              onClick={handleAbandonPlan}
-              disabled={abandoningPlan}
-              className="text-xs text-red-400 hover:text-red-600 ml-4 flex-shrink-0 disabled:opacity-50"
-            >
-              {abandoningPlan ? "Abandoning…" : "Abandon"}
-            </button>
+            {!showAbandonConfirm && (
+              <button
+                onClick={() => setShowAbandonConfirm(true)}
+                className="text-xs text-red-400 hover:text-red-600 ml-4 flex-shrink-0"
+              >
+                Abandon
+              </button>
+            )}
           </div>
+          {showAbandonConfirm && (
+            <div className="mt-2 flex items-center gap-2">
+              <span className="text-xs text-gray-600 flex-1">Abandon this plan?</span>
+              <button
+                onClick={() => setShowAbandonConfirm(false)}
+                className="text-xs px-3 py-1.5 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAbandonPlan}
+                disabled={abandoningPlan}
+                className="text-xs px-3 py-1.5 bg-red-500 text-white rounded-lg font-medium hover:bg-red-600 disabled:opacity-60 flex items-center gap-1"
+              >
+                {abandoningPlan ? (
+                  <><Loader2 className="w-3 h-3 animate-spin" />Abandoning…</>
+                ) : (
+                  "Confirm"
+                )}
+              </button>
+            </div>
+          )}
           {abandonError && <p className="text-red-500 text-xs mt-1">{abandonError}</p>}
           {/* Progress bar */}
           <div className="h-2 bg-gray-100 rounded-full overflow-hidden mt-3">
@@ -703,7 +727,7 @@ export default function WorkoutsPage() {
                               </span>
                             </div>
                             <div className="text-xs text-gray-400 mt-0.5">
-                              {session.exercises.length} exercises · tap to preview
+                              {session.exercises.length} exercises
                             </div>
                           </button>
                           {!session.is_completed && (
@@ -719,18 +743,24 @@ export default function WorkoutsPage() {
 
                         {/* Exercise preview */}
                         {sessExpanded && (
-                          <div className="px-4 pb-3 space-y-1.5">
+                          <div className="px-4 pb-3 space-y-2">
                             {session.exercises.map((ex, i) => (
-                              <div key={i} className="text-sm border-l-2 border-green-300 pl-3 py-0.5">
-                                <span className="font-medium text-gray-700">{ex.name}</span>
-                                <span className="text-gray-400">
-                                  {" "}— {ex.sets}×{ex.reps}
-                                </span>
-                                {ex.rest_seconds ? (
-                                  <span className="text-gray-400">, {ex.rest_seconds}s rest</span>
-                                ) : null}
+                              <div key={i} className="bg-gray-50 rounded-xl p-3">
+                                <div className="flex items-start justify-between gap-2">
+                                  <span className="text-sm font-semibold text-gray-800">{ex.name}</span>
+                                  <div className="flex gap-1.5 flex-shrink-0 flex-wrap justify-end">
+                                    <span className="text-xs font-medium bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+                                      {ex.sets}×{ex.reps}
+                                    </span>
+                                    {ex.rest_seconds ? (
+                                      <span className="text-xs font-medium bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">
+                                        {ex.rest_seconds}s rest
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                </div>
                                 {ex.notes && (
-                                  <div className="text-xs text-gray-400 mt-0.5">{ex.notes}</div>
+                                  <p className="text-xs text-gray-500 mt-1">{ex.notes}</p>
                                 )}
                               </div>
                             ))}

@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import axios from "axios";
 import { getToken, removeToken } from "../../lib/auth";
+import { API_URL } from "../../lib/config";
 import BottomNav from "../components/BottomNav";
 import {
   BarChart,
@@ -11,7 +11,6 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  Legend,
   ResponsiveContainer,
   LabelList,
 } from "recharts";
@@ -45,8 +44,8 @@ export default function DiaryPage() {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [weekOffset, setWeekOffset] = useState(0); // 0 = current week, 1 = last week, etc.
   const router = useRouter();
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
   useEffect(() => {
     const token = getToken();
@@ -55,29 +54,61 @@ export default function DiaryPage() {
       return;
     }
 
-    axios
-      .get(`${apiUrl}/logs/week`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      .then((res) => {
+    const fetchLogs = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`${API_URL}/logs/week?offset_days=${weekOffset * 7}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (!res.ok) {
+          if (res.status === 401) {
+            removeToken();
+            router.push("/login");
+            return;
+          }
+          setError("Failed to load diary. Please try again.");
+          return;
+        }
+
+        const data = await res.json();
         const grouped: Record<string, FoodItem[]> = {};
         const totals = { calories: 0, protein: 0, carbs: 0, fat: 0 };
 
-        for (const log of res.data.logs) {
+        for (const log of data.logs) {
           const date = new Date(log.timestamp).toLocaleDateString();
+          if (!grouped[date]) grouped[date] = [];
+
           const parsed =
             typeof log.parsed_json === "string"
-              ? JSON.parse(log.parsed_json)
+              ? (() => {
+                  try {
+                    return JSON.parse(log.parsed_json);
+                  } catch {
+                    return null;
+                  }
+                })()
               : log.parsed_json;
 
-          if (parsed && parsed.items) {
-            if (!grouped[date]) grouped[date] = [];
+          if (parsed?.items?.length) {
             grouped[date].push(...parsed.items);
-
-            totals.calories += parsed.total.calories;
-            totals.protein += parsed.total.protein;
-            totals.carbs += parsed.total.carbs;
-            totals.fat += parsed.total.fat;
+            totals.calories += parsed.total?.calories ?? 0;
+            totals.protein += parsed.total?.protein ?? 0;
+            totals.carbs += parsed.total?.carbs ?? 0;
+            totals.fat += parsed.total?.fat ?? 0;
+          } else {
+            // Fallback to top-level log fields
+            grouped[date].push({
+              name: log.input_text,
+              calories: log.calories ?? 0,
+              protein: log.protein ?? 0,
+              carbs: log.carbs ?? 0,
+              fat: log.fat ?? 0,
+            });
+            totals.calories += log.calories ?? 0;
+            totals.protein += log.protein ?? 0;
+            totals.carbs += log.carbs ?? 0;
+            totals.fat += log.fat ?? 0;
           }
         }
 
@@ -99,73 +130,156 @@ export default function DiaryPage() {
 
         setDailyLogs(output);
         setWeekTotal(totals);
-      })
-      .catch((err) => {
-        if (err.response?.status === 401) {
-          removeToken();
-          router.push("/login");
-        } else {
-          console.error("Failed to fetch logs:", err);
-          setError("Failed to load diary. Please try again.");
-        }
-      })
-      .finally(() => setLoading(false));
-  }, []);
+      } catch (err) {
+        console.error("Failed to fetch logs:", err);
+        setError("Failed to load diary. Please try again.");
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  if (loading) return <div className="p-6 text-gray-500">Loading…</div>;
-  if (error) return <div className="p-6 text-red-500">{error}</div>;
+    fetchLogs();
+  }, [weekOffset]);
+
+  const getWeekLabel = () => {
+    const now = new Date();
+    const endDate = new Date(now);
+    endDate.setDate(endDate.getDate() - weekOffset * 7);
+    const startDate = new Date(endDate);
+    startDate.setDate(startDate.getDate() - 7);
+    const fmt = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return `${fmt(startDate)} – ${fmt(endDate)}`;
+  };
+
+  if (loading) return (
+    <div className="min-h-screen bg-gradient-to-b from-green-100 to-green-50 flex items-center justify-center">
+      <p className="text-gray-500">Loading…</p>
+    </div>
+  );
+  if (error) return (
+    <div className="min-h-screen bg-gradient-to-b from-green-100 to-green-50 flex items-center justify-center">
+      <p className="text-red-500">{error}</p>
+    </div>
+  );
 
   return (
-    <div className="p-6 max-w-4xl mx-auto pb-24">
-      <h2 className="text-2xl font-bold mb-6">📘 Weekly Diary – Food Breakdown</h2>
-
-      {dailyLogs.length === 0 && <p>No logs found.</p>}
-
-      {dailyLogs.map((group, i) => (
-        <div key={i} className="bg-white border rounded-lg p-4 mb-6 shadow-sm">
-          <p className="text-sm text-gray-600 mb-2 font-medium">{group.date}</p>
-          <ul className="mb-2 space-y-1 text-sm">
-            {group.items.map((item, idx) => (
-              <li key={idx}>
-                <span className="font-semibold">{item.name}:</span>{" "}
-                {item.calories} cal, {item.protein}g P, {item.carbs}g C,{" "}
-                {item.fat}g F
-              </li>
-            ))}
-          </ul>
-          <div className="text-sm text-gray-800 font-semibold">
-            🧮 Total: {group.total.calories} cal • {group.total.protein}g P •{" "}
-            {group.total.carbs}g C • {group.total.fat}g F
-          </div>
-        </div>
-      ))}
-
-      <h3 className="text-xl font-bold mt-10 mb-2">📊 Weekly Macro Totals</h3>
-      <p className="mb-6 text-gray-700">
-        {weekTotal.calories} cal • {weekTotal.protein}g P • {weekTotal.carbs}g C
-        • {weekTotal.fat}g F
-      </p>
-
-      <div className="bg-white border p-4 rounded shadow">
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart
-            data={dailyLogs}
-            margin={{ top: 20, right: 30, left: 0, bottom: 5 }}
+    <div className="min-h-screen bg-gradient-to-b from-green-100 to-green-50">
+      <div style={{ height: 'max(24px, env(safe-area-inset-top))' }} />
+      <div className="px-5 max-w-2xl mx-auto pb-28">
+        <div className="flex items-center justify-between mb-6">
+          <button
+            onClick={() => { setWeekOffset(w => w + 1); setLoading(true); }}
+            className="p-2 rounded-xl bg-white shadow-sm text-gray-600 hover:bg-gray-50 transition-colors"
+            title="Previous week"
           >
-            <XAxis dataKey="date" />
-            <YAxis />
-            <Tooltip />
-            <Legend />
-            <Bar dataKey="total.calories" stackId="a" fill="#8884d8">
-              <LabelList dataKey="total.calories" position="top" />
-            </Bar>
-            <Bar dataKey="total.protein" stackId="a" fill="#82ca9d" />
-            <Bar dataKey="total.carbs" stackId="a" fill="#ffc658" />
-            <Bar dataKey="total.fat" stackId="a" fill="#ff7f7f" />
-          </BarChart>
-        </ResponsiveContainer>
+            ←
+          </button>
+          <div className="text-center">
+            <h2 className="text-lg font-bold text-green-900">{weekOffset === 0 ? 'This Week' : weekOffset === 1 ? 'Last Week' : `${weekOffset} Weeks Ago`}</h2>
+            <p className="text-sm text-gray-500">{getWeekLabel()}</p>
+          </div>
+          <button
+            onClick={() => { setWeekOffset(w => Math.max(0, w - 1)); setLoading(true); }}
+            disabled={weekOffset === 0}
+            className="p-2 rounded-xl bg-white shadow-sm text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            title="Next week"
+          >
+            →
+          </button>
+        </div>
+
+        {dailyLogs.length === 0 && (
+          <div className="py-16 text-center">
+            <div className="text-5xl mb-3">📅</div>
+            <p className="text-gray-700 font-semibold">No entries this week</p>
+            <p className="text-gray-400 text-sm mt-1">Log meals on the home screen to see them here</p>
+          </div>
+        )}
+
+        {dailyLogs.map((group) => (
+          <div key={group.date} className="bg-white rounded-2xl p-4 mb-4 shadow-sm">
+            <p className="text-sm text-gray-600 mb-2 font-medium">{group.date}</p>
+            <ul className="mb-2 space-y-1 text-sm">
+              {group.items.map((item, idx) => (
+                <li key={idx + "-" + item.name} className="flex items-baseline justify-between">
+                  <span className="font-medium text-gray-700">{item.name}</span>
+                  <span className="text-xs text-gray-500 ml-2 flex-shrink-0">
+                    {item.calories} kcal · <span className="text-blue-500">{item.protein}g P</span> · <span className="text-amber-500">{item.carbs}g C</span> · <span className="text-orange-500">{item.fat}g F</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div className="text-sm font-semibold text-gray-800 border-t border-gray-50 pt-2 mt-2 flex items-center gap-3 flex-wrap">
+              <span>{group.total.calories} kcal</span>
+              <span className="text-blue-600">{group.total.protein}g P</span>
+              <span className="text-amber-600">{group.total.carbs}g C</span>
+              <span className="text-orange-600">{group.total.fat}g F</span>
+            </div>
+          </div>
+        ))}
+
+        {dailyLogs.length > 0 && (<>
+        <h3 className="text-lg font-bold text-green-900 mt-8 mb-3">Weekly Calories</h3>
+        <div className="bg-white rounded-2xl shadow-sm p-4 mb-6">
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart
+              data={dailyLogs.map((g) => ({ date: g.date, calories: g.total.calories }))}
+              margin={{ top: 24, right: 16, left: 0, bottom: 5 }}
+            >
+              <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+              <YAxis tick={{ fontSize: 11 }} />
+              <Tooltip formatter={(value: number) => [`${value} kcal`, "Calories"]} />
+              <Bar dataKey="calories" fill="#16a34a" radius={[4, 4, 0, 0] as [number, number, number, number]}>
+                <LabelList dataKey="calories" position="top" style={{ fontSize: 10 }} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        <h3 className="text-lg font-bold text-green-900 mb-3">Macro Summary</h3>
+        <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="text-left px-4 py-3 font-semibold text-gray-700">Macro</th>
+                <th className="text-right px-4 py-3 font-semibold text-gray-700">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="border-b">
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-blue-500 flex-shrink-0" />
+                    <span className="text-gray-800">Protein</span>
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-right font-semibold text-blue-600">{weekTotal.protein}g</td>
+              </tr>
+              <tr className="border-b">
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 flex-shrink-0" />
+                    <span className="text-gray-800">Carbs</span>
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-right font-semibold text-amber-600">{weekTotal.carbs}g</td>
+              </tr>
+              <tr>
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-orange-500 flex-shrink-0" />
+                    <span className="text-gray-800">Fat</span>
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-right font-semibold text-orange-600">{weekTotal.fat}g</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        </>)}
+
+        <BottomNav />
       </div>
-      <BottomNav />
     </div>
   );
 }

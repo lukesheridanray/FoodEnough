@@ -1,7 +1,9 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { setToken } from "../../lib/auth";
+import { API_URL } from "../../lib/config";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -9,14 +11,13 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      const res = await fetch(`${apiUrl}/auth/login`, {
+      const res = await fetch(`${API_URL}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
@@ -29,7 +30,7 @@ export default function LoginPage() {
       setToken(data.access_token);
       router.push("/");
     } catch {
-      setError("Network error. Is the backend running?");
+      setError("Connection failed. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -73,14 +74,14 @@ export default function LoginPage() {
           </button>
         </form>
         <div className="mt-4 flex flex-col items-center gap-1">
-          <a href="/forgot-password" className="text-sm text-green-700 hover:underline">
+          <Link href="/forgot-password" className="text-sm text-green-700 hover:underline">
             Forgot password?
-          </a>
+          </Link>
           <p className="text-sm text-gray-500">
             No account?{" "}
-            <a href="/signup" className="text-green-700 font-medium hover:underline">
+            <Link href="/signup" className="text-green-700 font-medium hover:underline">
               Sign up
-            </a>
+            </Link>
           </p>
         </div>
       </div>

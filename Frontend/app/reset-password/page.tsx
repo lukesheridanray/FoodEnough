@@ -1,6 +1,8 @@
 "use client";
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { API_URL } from "../../lib/config";
 
 function ResetPasswordForm() {
   const [password, setPassword] = useState("");
@@ -11,7 +13,6 @@ function ResetPasswordForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get("token") ?? "";
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
   useEffect(() => {
     if (!token) setError("No reset token found. Please request a new reset link.");
@@ -30,7 +31,7 @@ function ResetPasswordForm() {
     }
     setLoading(true);
     try {
-      const res = await fetch(`${apiUrl}/auth/reset-password`, {
+      const res = await fetch(`${API_URL}/auth/reset-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, new_password: password }),
@@ -43,7 +44,7 @@ function ResetPasswordForm() {
       setSuccess(true);
       setTimeout(() => router.push("/login"), 2500);
     } catch {
-      setError("Network error. Is the backend running?");
+      setError("Connection failed. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -95,9 +96,9 @@ function ResetPasswordForm() {
             >
               {loading ? "Updating…" : "Set New Password"}
             </button>
-            <a href="/login" className="block text-center text-sm text-gray-500 hover:underline">
+            <Link href="/login" className="block text-center text-sm text-gray-500 hover:underline">
               Back to Login
-            </a>
+            </Link>
           </form>
         )}
       </div>

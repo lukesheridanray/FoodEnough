@@ -8,3 +8,5 @@ bcrypt
 email-validator
 slowapi
 python-multipart
+pytest
+httpx
