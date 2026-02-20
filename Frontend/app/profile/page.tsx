@@ -22,6 +22,11 @@ interface Profile {
   protein_goal: number | null;
   carbs_goal: number | null;
   fat_goal: number | null;
+  age?: number | null;
+  sex?: string | null;
+  height_cm?: number | null;
+  activity_level?: string | null;
+  goal_type?: string | null;
 }
 
 interface WeightEntry {
@@ -44,6 +49,43 @@ export default function ProfilePage() {
   const [savingGoals, setSavingGoals] = useState(false);
   const [goalsSuccess, setGoalsSuccess] = useState(false);
   const [goalsError, setGoalsError] = useState("");
+
+  // Anthropometric / calculator state
+  const [age, setAge] = useState<string>("");
+  const [sex, setSex] = useState<"M" | "F" | "">("");
+  const [heightCm, setHeightCm] = useState<string>("");
+  const [activityLevel, setActivityLevel] = useState<string>("");
+  // CHANGE 1: goalType persists in localStorage
+  const [goalType, setGoalType] = useState<"lose" | "maintain" | "gain">(() => {
+    if (typeof window === 'undefined') return 'maintain';
+    return (localStorage.getItem('goalType') as 'lose' | 'maintain' | 'gain') ?? 'maintain';
+  });
+  // CHANGE 2: survey mode state
+  const [surveyMode, setSurveyMode] = useState(false);
+  const [surveyStep, setSurveyStep] = useState(0); // 0=sex, 1=age+height, 2=activity, 3=goal
+  const [calculatedGoals, setCalculatedGoals] = useState<{
+    calorie_goal: number;
+    protein_goal: number;
+    carbs_goal: number;
+    fat_goal: number;
+    tdee: number;
+    bmr: number;
+    weight_lbs_used: number;
+  } | null>(null);
+  const [calculating, setCalculating] = useState(false);
+  const [calcError, setCalcError] = useState("");
+
+  // Today's summary state
+  const [todaySummary, setTodaySummary] = useState<{
+    calories_today: number;
+    protein_today: number;
+    carbs_today: number;
+    fat_today: number;
+    calorie_goal: number | null;
+    protein_goal: number | null;
+    carbs_goal: number | null;
+    fat_goal: number | null;
+  } | null>(null);
 
   // Weight state
   const [weightInput, setWeightInput] = useState("");
@@ -89,6 +131,14 @@ export default function ProfilePage() {
       setProteinGoal(data.protein_goal?.toString() ?? "");
       setCarbsGoal(data.carbs_goal?.toString() ?? "");
       setFatGoal(data.fat_goal?.toString() ?? "");
+      if (data.age) setAge(String(data.age));
+      if (data.sex) setSex(data.sex as "M" | "F");
+      if (data.height_cm) setHeightCm(String(data.height_cm));
+      if (data.activity_level) setActivityLevel(data.activity_level);
+      if (data.goal_type) setGoalType(data.goal_type as 'lose' | 'maintain' | 'gain');
+      // CHANGE 3: detect if profile is incomplete and enter survey mode
+      const profileComplete = !!(data.age && data.sex && data.height_cm && data.activity_level);
+      setSurveyMode(!profileComplete);
     } catch {
       // non-fatal
     }
@@ -107,9 +157,22 @@ export default function ProfilePage() {
     }
   };
 
+  const loadTodaySummary = async () => {
+    try {
+      const tzOffset = -new Date().getTimezoneOffset();
+      const summaryRes = await fetch(
+        `${API_URL}/summary/today?tz_offset_minutes=${tzOffset}`,
+        { headers: { Authorization: `Bearer ${getToken()}` } }
+      );
+      if (summaryRes.ok) setTodaySummary(await summaryRes.json());
+    } catch {
+      // non-fatal
+    }
+  };
+
   useEffect(() => {
     if (!getToken()) { router.push("/login"); return; }
-    Promise.all([loadProfile(), loadWeightHistory()]).finally(() => setLoading(false));
+    Promise.all([loadProfile(), loadWeightHistory(), loadTodaySummary()]).finally(() => setLoading(false));
   }, []);
 
   const handleSaveGoals = async (e: React.FormEvent) => {
@@ -142,6 +205,49 @@ export default function ProfilePage() {
       setGoalsError("Connection failed. Please try again.");
     } finally {
       setSavingGoals(false);
+    }
+  };
+
+  const handleCalculateGoals = async () => {
+    setCalcError("");
+    if (!age || !sex || !heightCm || !activityLevel) {
+      setCalcError("Please fill in all fields above.");
+      return;
+    }
+    // CHANGE 4a: save goalType to localStorage before calculating
+    localStorage.setItem('goalType', goalType);
+    setCalculating(true);
+    try {
+      const res = await fetch(`${API_URL}/profile/calculate-goals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({
+          age: parseInt(age),
+          sex,
+          height_cm: parseFloat(heightCm),
+          activity_level: activityLevel,
+          goal_type: goalType,
+        }),
+      });
+      if (res.status === 401) { removeToken(); router.push("/login"); return; }
+      if (res.ok) {
+        const goals = await res.json();
+        setCalculatedGoals(goals);
+        // Update the displayed goal inputs with the calculated values
+        setCalorieGoal(String(goals.calorie_goal));
+        setProteinGoal(String(goals.protein_goal));
+        setCarbsGoal(String(goals.carbs_goal));
+        setFatGoal(String(goals.fat_goal));
+        // CHANGE 4b: exit survey mode on success
+        setSurveyMode(false);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setCalcError(err.detail || "Calculation failed. Please try again.");
+      }
+    } catch {
+      setCalcError("Connection failed. Please try again.");
+    } finally {
+      setCalculating(false);
     }
   };
 
@@ -209,11 +315,208 @@ export default function ProfilePage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-green-100 to-green-50 pb-24">
-      <div className="h-6" />
+      {/* CHANGE 7: safe area inset */}
+      <div style={{ height: 'max(24px, env(safe-area-inset-top))' }} />
       <header className="px-5 py-3">
         <h1 className="text-xl font-bold text-green-900">Profile & Settings</h1>
         {profile && <p className="text-sm text-gray-500">{profile.email}</p>}
       </header>
+
+      {/* CHANGE 5: Health Profile — Survey or Summary */}
+      {surveyMode ? (
+        /* ── SURVEY MODE ── */
+        <section className="px-5 mt-6">
+          <div className="bg-white rounded-2xl shadow-sm p-5">
+            {/* Progress dots */}
+            <div className="flex gap-1.5 mb-4">
+              {[0, 1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  className={`h-1.5 flex-1 rounded-full transition-all ${
+                    i <= surveyStep ? "bg-green-500" : "bg-gray-200"
+                  }`}
+                />
+              ))}
+            </div>
+
+            {/* Step 0 — Sex */}
+            {surveyStep === 0 && (
+              <div>
+                <h2 className="text-base font-bold text-green-900 mb-1">Let's set your goals</h2>
+                <p className="text-sm text-gray-500 mb-4">What's your biological sex?</p>
+                <div className="flex gap-3">
+                  {(["M", "F"] as const).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => { setSex(s); setSurveyStep(1); }}
+                      className={`flex-1 py-4 text-sm font-semibold rounded-2xl border-2 transition-all ${
+                        sex === s ? "border-green-500 text-green-700 bg-green-50" : "border-gray-200 text-gray-600 hover:border-gray-300"
+                      }`}
+                    >
+                      {s === "M" ? "Male" : "Female"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Step 1 — Age + Height */}
+            {surveyStep === 1 && (
+              <div>
+                <h2 className="text-base font-bold text-green-900 mb-1">Your stats</h2>
+                <p className="text-sm text-gray-500 mb-4">We use these to calculate your metabolism accurately.</p>
+                <div className="flex gap-3 mb-4">
+                  <div className="flex-1">
+                    <label className="text-xs font-medium text-gray-500 uppercase tracking-wider">Age</label>
+                    <input
+                      type="number"
+                      value={age}
+                      onChange={(e) => setAge(e.target.value)}
+                      placeholder="e.g. 28"
+                      min={10} max={100}
+                      className="mt-1.5 w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-xs font-medium text-gray-500 uppercase tracking-wider">Height (cm)</label>
+                    <input
+                      type="number"
+                      value={heightCm}
+                      onChange={(e) => setHeightCm(e.target.value)}
+                      placeholder="e.g. 178"
+                      min={100} max={250}
+                      className="mt-1.5 w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+                <button
+                  onClick={() => { if (age && heightCm) setSurveyStep(2); }}
+                  disabled={!age || !heightCm}
+                  className="w-full py-2.5 bg-gradient-to-r from-green-600 to-green-500 text-white text-sm font-semibold rounded-xl shadow-sm disabled:opacity-40"
+                >
+                  Continue →
+                </button>
+                <button onClick={() => setSurveyStep(0)} className="mt-2 w-full text-xs text-gray-400 hover:text-gray-600">
+                  ← Back
+                </button>
+              </div>
+            )}
+
+            {/* Step 2 — Activity */}
+            {surveyStep === 2 && (
+              <div>
+                <h2 className="text-base font-bold text-green-900 mb-1">Activity level</h2>
+                <p className="text-sm text-gray-500 mb-3">How active are you on a typical week?</p>
+                <div className="space-y-2">
+                  {[
+                    { value: "sedentary",   label: "Sedentary",          desc: "Desk job, little/no exercise" },
+                    { value: "light",       label: "Lightly active",     desc: "Exercise 1–3 days/week" },
+                    { value: "moderate",    label: "Moderately active",  desc: "Exercise 3–5 days/week" },
+                    { value: "active",      label: "Very active",        desc: "Hard exercise 6–7 days/week" },
+                    { value: "very_active", label: "Extra active",       desc: "Physical job + daily training" },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => { setActivityLevel(opt.value); setSurveyStep(3); }}
+                      className={`w-full text-left px-3 py-2.5 rounded-xl border-2 transition-all ${
+                        activityLevel === opt.value
+                          ? "border-green-500 bg-green-50"
+                          : "border-gray-100 hover:border-green-200"
+                      }`}
+                    >
+                      <span className={`text-sm font-medium ${activityLevel === opt.value ? "text-green-700" : "text-gray-700"}`}>
+                        {opt.label}
+                      </span>
+                      <span className="text-xs text-gray-400 ml-2">{opt.desc}</span>
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => setSurveyStep(1)} className="mt-3 w-full text-xs text-gray-400 hover:text-gray-600">
+                  ← Back
+                </button>
+              </div>
+            )}
+
+            {/* Step 3 — Goal + Calculate */}
+            {surveyStep === 3 && (
+              <div>
+                <h2 className="text-base font-bold text-green-900 mb-1">What's your goal?</h2>
+                <p className="text-sm text-gray-500 mb-3">We'll tailor your calorie and macro targets to this.</p>
+                <div className="space-y-2 mb-4">
+                  {([
+                    { value: "lose",     label: "Lose weight",  desc: "500 kcal deficit · preserve muscle", color: "border-blue-400 bg-blue-50 text-blue-700" },
+                    { value: "maintain", label: "Maintain",     desc: "Eat at your TDEE",                   color: "border-green-500 bg-green-50 text-green-700" },
+                    { value: "gain",     label: "Build muscle", desc: "300 kcal surplus · high protein",     color: "border-orange-400 bg-orange-50 text-orange-700" },
+                  ] as const).map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setGoalType(opt.value)}
+                      className={`w-full text-left px-3 py-2.5 rounded-xl border-2 transition-all ${
+                        goalType === opt.value ? opt.color : "border-gray-100 hover:border-gray-200 text-gray-700"
+                      }`}
+                    >
+                      <span className="text-sm font-semibold">{opt.label}</span>
+                      <span className="text-xs text-gray-400 ml-2">{opt.desc}</span>
+                    </button>
+                  ))}
+                </div>
+                {calcError && <p className="text-red-500 text-xs mb-2">{calcError}</p>}
+                <button
+                  onClick={handleCalculateGoals}
+                  disabled={calculating}
+                  className="w-full py-2.5 bg-gradient-to-r from-green-600 to-green-500 text-white text-sm font-semibold rounded-xl shadow-sm disabled:opacity-60 flex items-center justify-center gap-2"
+                >
+                  {calculating ? <><span className="animate-spin inline-block">⟳</span> Calculating…</> : "Calculate My Goals →"}
+                </button>
+                <button onClick={() => setSurveyStep(2)} className="mt-2 w-full text-xs text-gray-400 hover:text-gray-600">
+                  ← Back
+                </button>
+              </div>
+            )}
+          </div>
+        </section>
+      ) : (
+        /* ── PROFILE COMPLETE — Summary card ── */
+        <section className="px-5 mt-6">
+          <div className="bg-white rounded-2xl shadow-sm p-5">
+            <div className="flex items-start justify-between mb-3">
+              <div>
+                <h2 className="text-base font-bold text-green-900">Health Profile</h2>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {sex === "M" ? "Male" : sex === "F" ? "Female" : ""}{age ? ` · ${age} yrs` : ""}{heightCm ? ` · ${heightCm}cm` : ""}
+                  {activityLevel ? ` · ${activityLevel.replace("_", " ")}` : ""}
+                </p>
+              </div>
+              <button
+                onClick={() => { setSurveyMode(true); setSurveyStep(0); setCalculatedGoals(null); }}
+                className="text-xs text-green-600 font-medium hover:text-green-800"
+              >
+                Edit
+              </button>
+            </div>
+
+            {/* Goals grid */}
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { label: "Calories", value: calorieGoal ? `${calorieGoal} kcal` : "—", color: "text-green-700" },
+                { label: "Protein",  value: proteinGoal ? `${proteinGoal}g` : "—",     color: "text-blue-600" },
+                { label: "Carbs",    value: carbsGoal ? `${carbsGoal}g` : "—",         color: "text-amber-600" },
+                { label: "Fat",      value: fatGoal ? `${fatGoal}g` : "—",             color: "text-orange-600" },
+              ].map((item) => (
+                <div key={item.label} className="bg-gray-50 rounded-xl p-3 text-center">
+                  <p className="text-xs text-gray-400">{item.label}</p>
+                  <p className={`text-lg font-bold ${item.color}`}>{item.value}</p>
+                </div>
+              ))}
+            </div>
+
+            <p className="text-xs text-gray-400 text-center mt-3">
+              Goal: <span className="font-medium text-gray-600 capitalize">{goalType === "lose" ? "Lose weight" : goalType === "gain" ? "Build muscle" : "Maintain"}</span>
+              {calculatedGoals ? ` · BMR ${calculatedGoals.bmr} · TDEE ${calculatedGoals.tdee} kcal` : ""}
+            </p>
+          </div>
+        </section>
+      )}
 
       {/* Calorie & Macro Goals */}
       <section className="px-5 mt-4">
@@ -272,6 +575,155 @@ export default function ProfilePage() {
           </button>
         </form>
       </section>
+
+      {/* Today's Progress */}
+      {todaySummary && (todaySummary.calorie_goal || todaySummary.protein_goal) && (
+        <section className="px-5 mt-4">
+          <div className="bg-white rounded-2xl shadow-sm p-5">
+            <h2 className="text-base font-bold text-green-900 mb-4">Today's Progress</h2>
+            <div className="space-y-4">
+              {[
+                {
+                  label: "Calories",
+                  value: todaySummary.calories_today,
+                  goal: todaySummary.calorie_goal,
+                  bar: "bg-green-500",
+                  text: "text-green-700",
+                  unit: "kcal",
+                },
+                {
+                  label: "Protein",
+                  value: todaySummary.protein_today,
+                  goal: todaySummary.protein_goal,
+                  bar: "bg-blue-500",
+                  text: "text-blue-600",
+                  unit: "g",
+                },
+                {
+                  label: "Carbs",
+                  value: todaySummary.carbs_today,
+                  goal: todaySummary.carbs_goal,
+                  bar: "bg-amber-500",
+                  text: "text-amber-600",
+                  unit: "g",
+                },
+                {
+                  label: "Fat",
+                  value: todaySummary.fat_today,
+                  goal: todaySummary.fat_goal,
+                  bar: "bg-orange-500",
+                  text: "text-orange-600",
+                  unit: "g",
+                },
+              ].map((item) => {
+                const pct = item.goal ? Math.min(100, Math.round((item.value / item.goal) * 100)) : null;
+                return (
+                  <div key={item.label}>
+                    <div className="flex justify-between items-baseline mb-1">
+                      <span className="text-sm font-medium text-gray-700">{item.label}</span>
+                      <span className="text-sm">
+                        <span className={`font-bold ${item.text}`}>{item.value}{item.unit}</span>
+                        {item.goal && (
+                          <span className="text-gray-400 text-xs"> / {item.goal}{item.unit}</span>
+                        )}
+                      </span>
+                    </div>
+                    <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full ${item.bar} rounded-full transition-all`}
+                        style={{ width: pct !== null ? `${pct}%` : item.value > 0 ? "100%" : "0%" }}
+                      />
+                    </div>
+                    {pct !== null && (
+                      <p className="text-xs text-gray-400 mt-0.5 text-right">{pct}%</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* CHANGE 6: Recommendations */}
+      {todaySummary && (todaySummary.calorie_goal || todaySummary.protein_goal) && (
+        <section className="px-5 mt-4">
+          <div className="bg-white rounded-2xl shadow-sm p-5">
+            <h2 className="text-base font-bold text-green-900 mb-3">Today's Recommendations</h2>
+            <div className="space-y-2">
+              {(() => {
+                const tips: { icon: string; text: string; color: string }[] = [];
+                const cal = todaySummary.calories_today;
+                const calGoal = todaySummary.calorie_goal;
+                const pro = todaySummary.protein_today;
+                const proGoal = todaySummary.protein_goal;
+                const carb = todaySummary.carbs_today;
+                const carbGoal = todaySummary.carbs_goal;
+                const fat = todaySummary.fat_today;
+                const fatGoal = todaySummary.fat_goal;
+                const calRem = calGoal ? calGoal - cal : null;
+
+                // No food logged yet
+                if (cal === 0) {
+                  tips.push({ icon: "🍽", text: "Log your first meal to start tracking today's progress.", color: "text-gray-600" });
+                }
+
+                // Calorie tips
+                if (calGoal && calRem !== null) {
+                  if (calRem < -200) {
+                    tips.push({ icon: "⚠️", text: `You're ${Math.abs(calRem)} kcal over your goal — consider a lighter dinner.`, color: "text-red-600" });
+                  } else if (calRem < 100) {
+                    tips.push({ icon: "✅", text: "Calorie goal hit for today — great work.", color: "text-green-600" });
+                  } else if (goalType === "gain" && calRem > 300) {
+                    tips.push({ icon: "📈", text: `You still need ${calRem} kcal to hit your surplus — don't skip a meal.`, color: "text-orange-600" });
+                  } else if (goalType === "lose" && calRem > 0) {
+                    tips.push({ icon: "🎯", text: `${calRem} kcal remaining — you're on track for your deficit.`, color: "text-blue-600" });
+                  } else if (goalType === "maintain" && calRem > 0) {
+                    tips.push({ icon: "⚖️", text: `${calRem} kcal remaining to hit your maintenance target.`, color: "text-green-700" });
+                  }
+                }
+
+                // Protein tips
+                if (proGoal && pro > 0) {
+                  const proteinPct = Math.round((pro / proGoal) * 100);
+                  if (proteinPct >= 100) {
+                    tips.push({ icon: "💪", text: "Protein goal hit — your muscles are taken care of.", color: "text-blue-600" });
+                  } else if (proteinPct < 50 && cal > (calGoal ?? 0) * 0.5) {
+                    tips.push({ icon: "🥩", text: `Protein is at ${proteinPct}% — add a lean protein source to your next meal.`, color: "text-blue-600" });
+                  }
+                } else if (proGoal && pro === 0 && cal > 0) {
+                  tips.push({ icon: "🥩", text: "No protein tracked yet — prioritise a protein source at your next meal.", color: "text-blue-600" });
+                }
+
+                // Goal-specific tips
+                if (goalType === "lose") {
+                  if (proGoal && pro >= proGoal * 0.8) {
+                    tips.push({ icon: "🏆", text: "High protein is helping preserve muscle while you cut — keep it up.", color: "text-green-600" });
+                  }
+                }
+
+                if (goalType === "gain") {
+                  if (carbGoal && carb < carbGoal * 0.5 && cal > 0) {
+                    tips.push({ icon: "🍚", text: "Carbs are low for a muscle-building day — fuel your training.", color: "text-amber-600" });
+                  }
+                }
+
+                // Fallback
+                if (tips.length === 0) {
+                  tips.push({ icon: "✨", text: "Everything on track — keep logging to stay consistent.", color: "text-green-600" });
+                }
+
+                return tips.slice(0, 3).map((tip, i) => (
+                  <div key={i} className="flex items-start gap-2.5 p-3 bg-gray-50 rounded-xl">
+                    <span className="text-base flex-shrink-0">{tip.icon}</span>
+                    <p className={`text-sm ${tip.color}`}>{tip.text}</p>
+                  </div>
+                ));
+              })()}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Weight Logging */}
       <section className="px-5 mt-4">

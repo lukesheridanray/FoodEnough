@@ -84,6 +84,11 @@ class User(Base):
     protein_goal = Column(Integer, nullable=True)
     carbs_goal = Column(Integer, nullable=True)
     fat_goal = Column(Integer, nullable=True)
+    age = Column(Integer, nullable=True)
+    sex = Column(String, nullable=True)          # 'M' or 'F'
+    height_cm = Column(Float, nullable=True)
+    activity_level = Column(String, nullable=True)  # 'sedentary','light','moderate','active','very_active'
+    goal_type = Column(String, nullable=True)        # 'lose', 'maintain', 'gain'
     logs = relationship("FoodLog", back_populates="user")
     workouts = relationship("Workout", back_populates="user")
     weight_entries = relationship("WeightEntry", back_populates="user")
@@ -102,6 +107,9 @@ class FoodLog(Base):
     protein = Column(Float)
     carbs = Column(Float)
     fat = Column(Float)
+    fiber = Column(Float, nullable=True)
+    sugar = Column(Float, nullable=True)
+    sodium = Column(Float, nullable=True)    # milligrams
     parsed_json = Column(Text)
     user = relationship("User", back_populates="logs")
 
@@ -197,6 +205,29 @@ with engine.connect() as _conn:
             _conn.commit()
         except Exception:
             pass  # column already exists
+
+
+def _run_migrations():
+    """Add new columns to existing tables without Alembic."""
+    new_cols = [
+        "ALTER TABLE users ADD COLUMN age INTEGER",
+        "ALTER TABLE users ADD COLUMN sex VARCHAR",
+        "ALTER TABLE users ADD COLUMN height_cm FLOAT",
+        "ALTER TABLE users ADD COLUMN activity_level VARCHAR",
+        "ALTER TABLE users ADD COLUMN goal_type VARCHAR",
+        "ALTER TABLE food_logs ADD COLUMN fiber FLOAT",
+        "ALTER TABLE food_logs ADD COLUMN sugar FLOAT",
+        "ALTER TABLE food_logs ADD COLUMN sodium FLOAT",
+    ]
+    with engine.connect() as conn:
+        for sql in new_cols:
+            try:
+                conn.execute(text(sql))
+                conn.commit()
+            except Exception:
+                pass  # column already exists
+
+_run_migrations()
 
 
 # ============================================================
@@ -297,6 +328,71 @@ def send_password_reset_email(to_email: str, reset_url: str) -> bool:
     except Exception as e:
         print(f"[EMAIL] Failed to send reset email to {to_email}: {e}", file=sys.stderr, flush=True)
         return False
+
+
+# ============================================================
+# Nutrition Goal Calculation (Mifflin-St Jeor)
+# ============================================================
+ACTIVITY_MULTIPLIERS = {
+    "sedentary":   1.2,    # desk job, no exercise
+    "light":       1.375,  # light exercise 1-3 days/week
+    "moderate":    1.55,   # moderate exercise 3-5 days/week
+    "active":      1.725,  # hard exercise 6-7 days/week
+    "very_active": 1.9,    # very hard exercise + physical job
+}
+
+def calculate_nutrition_goals(
+    weight_lbs: float,
+    height_cm: float,
+    age: int,
+    sex: str,
+    activity_level: str,
+    goal: str,  # 'lose', 'maintain', 'gain'
+) -> dict:
+    """
+    Mifflin-St Jeor BMR -> TDEE -> macro split.
+    Protein: 2g/kg (high protein works for all goals)
+    Fat: 30% of adjusted calories
+    Carbs: remainder
+    """
+    weight_kg = weight_lbs * 0.453592
+
+    # BMR (Mifflin-St Jeor)
+    if sex.upper() == "M":
+        bmr = 10 * weight_kg + 6.25 * height_cm - 5 * age + 5
+    else:
+        bmr = 10 * weight_kg + 6.25 * height_cm - 5 * age - 161
+
+    # TDEE
+    multiplier = ACTIVITY_MULTIPLIERS.get(activity_level, 1.55)
+    tdee = bmr * multiplier
+
+    # Goal adjustment
+    if goal == "lose":
+        target_calories = tdee - 500      # ~0.5 kg/week deficit
+    elif goal == "gain":
+        target_calories = tdee + 300      # lean bulk
+    else:
+        target_calories = tdee            # maintain
+
+    target_calories = max(1200, round(target_calories))  # safety floor
+
+    # Macro split
+    protein_g = round(weight_kg * 2.0)              # 2g per kg
+    fat_g = round((target_calories * 0.30) / 9)     # 30% of calories from fat
+    protein_cal = protein_g * 4
+    fat_cal = fat_g * 9
+    carb_cal = max(0, target_calories - protein_cal - fat_cal)
+    carbs_g = round(carb_cal / 4)
+
+    return {
+        "calorie_goal": target_calories,
+        "protein_goal": protein_g,
+        "carbs_goal": carbs_g,
+        "fat_goal": fat_g,
+        "tdee": round(tdee),
+        "bmr": round(bmr),
+    }
 
 
 # ============================================================
@@ -429,12 +525,46 @@ class ProfileUpdate(BaseModel):
     protein_goal: Optional[int] = None
     carbs_goal: Optional[int] = None
     fat_goal: Optional[int] = None
+    age: Optional[int] = None
+    sex: Optional[str] = None
+    height_cm: Optional[float] = None
+    activity_level: Optional[str] = None
+    goal_type: Optional[str] = None  # 'lose', 'maintain', 'gain'
 
     @field_validator("calorie_goal", "protein_goal", "carbs_goal", "fat_goal")
     @classmethod
     def goals_positive(cls, v: Optional[int]) -> Optional[int]:
         if v is not None and v <= 0:
             raise ValueError("Goal values must be greater than 0")
+        return v
+
+    @field_validator("age")
+    @classmethod
+    def age_valid(cls, v):
+        if v is not None and not (10 <= v <= 120):
+            raise ValueError("Age must be between 10 and 120")
+        return v
+
+    @field_validator("sex")
+    @classmethod
+    def sex_valid(cls, v):
+        if v is not None and v.upper() not in ("M", "F"):
+            raise ValueError("Sex must be M or F")
+        return v
+
+    @field_validator("activity_level")
+    @classmethod
+    def activity_valid(cls, v):
+        valid = {"sedentary", "light", "moderate", "active", "very_active"}
+        if v is not None and v not in valid:
+            raise ValueError(f"activity_level must be one of {valid}")
+        return v
+
+    @field_validator("height_cm")
+    @classmethod
+    def height_valid(cls, v):
+        if v is not None and not (50 <= v <= 280):
+            raise ValueError("height_cm must be between 50 and 280")
         return v
 
 
@@ -467,6 +597,9 @@ class ParsedLogInput(BaseModel):
     protein: float
     carbs: float
     fat: float
+    fiber: Optional[float] = None
+    sugar: Optional[float] = None
+    sodium: Optional[float] = None
     parsed_json: Optional[str] = Field(default=None, max_length=10000)
 
     @field_validator("calories", "protein", "carbs", "fat")
@@ -474,6 +607,45 @@ class ParsedLogInput(BaseModel):
     def macros_non_negative(cls, v: float) -> float:
         if v < 0:
             raise ValueError("Macro values must be non-negative")
+        return v
+
+    @field_validator("fiber", "sugar", "sodium")
+    @classmethod
+    def extended_non_negative(cls, v):
+        if v is not None and v < 0:
+            raise ValueError("Nutrient values must be non-negative")
+        return v
+
+
+class ManualLogInput(BaseModel):
+    name: str = Field(max_length=500)
+    calories: float = 0.0
+    protein: float = 0.0
+    carbs: float = 0.0
+    fat: float = 0.0
+    fiber: Optional[float] = None
+    sugar: Optional[float] = None
+    sodium: Optional[float] = None
+
+    @field_validator("name")
+    @classmethod
+    def name_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("name cannot be blank")
+        return v
+
+    @field_validator("calories", "protein", "carbs", "fat")
+    @classmethod
+    def macros_non_negative(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("Macro values must be non-negative")
+        return v
+
+    @field_validator("fiber", "sugar", "sodium")
+    @classmethod
+    def extended_non_negative(cls, v):
+        if v is not None and v < 0:
+            raise ValueError("Nutrient values must be non-negative")
         return v
 
 
@@ -914,6 +1086,42 @@ def save_parsed_log(
         protein=data.protein,
         carbs=data.carbs,
         fat=data.fat,
+        fiber=data.fiber,
+        sugar=data.sugar,
+        sodium=data.sodium,
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+    return {"status": "success", "entry_id": log.id}
+
+
+# ============================================================
+# POST /logs/manual  — manually entered food log (no AI)
+# ============================================================
+@app.post("/logs/manual")
+@limiter.limit("60/minute")
+def save_manual_log(
+    request: Request,
+    data: ManualLogInput,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    parsed = {
+        "items": [{"name": data.name, "calories": data.calories, "protein": data.protein, "carbs": data.carbs, "fat": data.fat}],
+        "total": {"calories": data.calories, "protein": data.protein, "carbs": data.carbs, "fat": data.fat},
+    }
+    log = FoodLog(
+        user_id=current_user.id,
+        input_text=f"✏️ {data.name}",
+        parsed_json=json.dumps(parsed),
+        calories=data.calories,
+        protein=data.protein,
+        carbs=data.carbs,
+        fat=data.fat,
+        fiber=data.fiber,
+        sugar=data.sugar,
+        sodium=data.sodium,
     )
     db.add(log)
     db.commit()
@@ -952,6 +1160,9 @@ def get_logs_today(
             "protein": log.protein,
             "carbs": log.carbs,
             "fat": log.fat,
+            "fiber": log.fiber,
+            "sugar": log.sugar,
+            "sodium": log.sodium,
         }
         for log in logs
     ]
@@ -1054,6 +1265,11 @@ def get_profile(
         "protein_goal": current_user.protein_goal,
         "carbs_goal": current_user.carbs_goal,
         "fat_goal": current_user.fat_goal,
+        "age": current_user.age,
+        "sex": current_user.sex,
+        "height_cm": current_user.height_cm,
+        "activity_level": current_user.activity_level,
+        "goal_type": current_user.goal_type,
     }
 
 
@@ -1066,17 +1282,106 @@ def update_profile(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    current_user.calorie_goal = data.calorie_goal
-    current_user.protein_goal = data.protein_goal
-    current_user.carbs_goal = data.carbs_goal
-    current_user.fat_goal = data.fat_goal
+    # Update manual goal fields if provided
+    if data.calorie_goal is not None:
+        current_user.calorie_goal = data.calorie_goal
+    if data.protein_goal is not None:
+        current_user.protein_goal = data.protein_goal
+    if data.carbs_goal is not None:
+        current_user.carbs_goal = data.carbs_goal
+    if data.fat_goal is not None:
+        current_user.fat_goal = data.fat_goal
+
+    # Update anthropometric fields if provided
+    if data.age is not None:
+        current_user.age = data.age
+    if data.sex is not None:
+        current_user.sex = data.sex.upper()
+    if data.height_cm is not None:
+        current_user.height_cm = data.height_cm
+    if data.activity_level is not None:
+        current_user.activity_level = data.activity_level
+    if data.goal_type is not None:
+        current_user.goal_type = data.goal_type
+
     db.commit()
     db.refresh(current_user)
+
     return {
         "calorie_goal": current_user.calorie_goal,
         "protein_goal": current_user.protein_goal,
         "carbs_goal": current_user.carbs_goal,
         "fat_goal": current_user.fat_goal,
+        "age": current_user.age,
+        "sex": current_user.sex,
+        "height_cm": current_user.height_cm,
+        "activity_level": current_user.activity_level,
+        "goal_type": current_user.goal_type,
+    }
+
+
+# ============================================================
+# POST /profile/calculate-goals  — Mifflin-St Jeor goal calc
+# ============================================================
+@app.post("/profile/calculate-goals")
+def calculate_goals(
+    data: ProfileUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Calculate nutrition goals using Mifflin-St Jeor formula.
+    Saves anthropometric fields and computed goals to the user profile.
+    Requires: age, sex, height_cm, activity_level.
+    Uses latest weight entry for weight. Falls back to 70kg if no weight logged.
+    """
+    # Resolve fields: use provided values or fall back to stored values
+    age = data.age or current_user.age
+    sex = (data.sex or current_user.sex or "").upper()
+    height_cm = data.height_cm or current_user.height_cm
+    activity_level = data.activity_level or current_user.activity_level
+    goal_type = data.goal_type or "maintain"
+
+    if not all([age, sex, height_cm, activity_level]):
+        raise HTTPException(
+            status_code=422,
+            detail="age, sex, height_cm, and activity_level are required to calculate goals"
+        )
+
+    # Get latest weight
+    latest_weight = (
+        db.query(WeightEntry)
+        .filter(WeightEntry.user_id == current_user.id)
+        .order_by(WeightEntry.timestamp.desc())
+        .first()
+    )
+    weight_lbs = latest_weight.weight_lbs if latest_weight else 154.0  # 70kg default
+
+    goals = calculate_nutrition_goals(
+        weight_lbs=weight_lbs,
+        height_cm=height_cm,
+        age=age,
+        sex=sex,
+        activity_level=activity_level,
+        goal=goal_type,
+    )
+
+    # Save everything to user
+    current_user.age = age
+    current_user.sex = sex
+    current_user.height_cm = height_cm
+    current_user.activity_level = activity_level
+    current_user.goal_type = goal_type
+    current_user.calorie_goal = goals["calorie_goal"]
+    current_user.protein_goal = goals["protein_goal"]
+    current_user.carbs_goal = goals["carbs_goal"]
+    current_user.fat_goal = goals["fat_goal"]
+    db.commit()
+    db.refresh(current_user)
+
+    return {
+        **goals,
+        "weight_lbs_used": weight_lbs,
     }
 
 
@@ -1217,6 +1522,9 @@ def get_today_summary(
     protein_today = sum(log.protein or 0 for log in today_logs)
     carbs_today = sum(log.carbs or 0 for log in today_logs)
     fat_today = sum(log.fat or 0 for log in today_logs)
+    fiber_today = sum(log.fiber or 0 for log in today_logs)
+    sugar_today = sum(log.sugar or 0 for log in today_logs)
+    sodium_today = sum(log.sodium or 0 for log in today_logs)
 
     # Calories remaining vs goal
     calorie_goal = current_user.calorie_goal
@@ -1248,6 +1556,9 @@ def get_today_summary(
         "protein_goal": current_user.protein_goal,
         "carbs_goal": current_user.carbs_goal,
         "fat_goal": current_user.fat_goal,
+        "fiber_today": round(fiber_today, 1),
+        "sugar_today": round(sugar_today, 1),
+        "sodium_today": round(sodium_today),
         "latest_weight_lbs": latest_weight.weight_lbs if latest_weight else None,
         "latest_workout_name": latest_workout.name if latest_workout else None,
     }

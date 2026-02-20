@@ -37,7 +37,7 @@ interface ImageAnalysis {
 interface BarcodeResult {
   description: string;
   items: ImageItem[];
-  total: { calories: number; protein: number; carbs: number; fat: number };
+  total: { calories: number; protein: number; carbs: number; fat: number; fiber?: number | null; sugar?: number | null; sodium?: number | null };
 }
 
 interface Log {
@@ -48,6 +48,9 @@ interface Log {
   protein: number;
   carbs: number;
   fat: number;
+  fiber?: number | null;
+  sugar?: number | null;
+  sodium?: number | null;
 }
 
 export default function FoodEnoughApp() {
@@ -75,7 +78,20 @@ export default function FoodEnoughApp() {
   const [editText, setEditText] = useState("");
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState("");
-  const [inputTab, setInputTab] = useState<"text" | "photo" | "barcode">("text");
+  const [inputTab, setInputTab] = useState<"text" | "photo" | "barcode" | "manual">("text");
+  const [expandedLogId, setExpandedLogId] = useState<number | null>(null);
+  const [manualName, setManualName] = useState("");
+  const [manualCalories, setManualCalories] = useState("");
+  const [manualProtein, setManualProtein] = useState("");
+  const [manualCarbs, setManualCarbs] = useState("");
+  const [manualFat, setManualFat] = useState("");
+  const [manualFiber, setManualFiber] = useState("");
+  const [manualSugar, setManualSugar] = useState("");
+  const [manualSodium, setManualSodium] = useState("");
+  const [manualLoading, setManualLoading] = useState(false);
+  const [manualError, setManualError] = useState("");
+  const [manualSuccess, setManualSuccess] = useState(false);
+  const [showManualAdvanced, setShowManualAdvanced] = useState(false);
   const mealInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -198,12 +214,15 @@ export default function FoodEnoughApp() {
       const protein  = Math.round((n["proteins_100g"] ?? 0) * factor * 10) / 10;
       const carbs    = Math.round((n["carbohydrates_100g"] ?? 0) * factor * 10) / 10;
       const fat      = Math.round((n["fat_100g"] ?? 0) * factor * 10) / 10;
+      const fiber    = n["fiber_100g"] != null ? Math.round((n["fiber_100g"] as number) * factor * 10) / 10 : null;
+      const sugar    = n["sugars_100g"] != null ? Math.round((n["sugars_100g"] as number) * factor * 10) / 10 : null;
+      const sodium   = n["sodium_100g"] != null ? Math.round((n["sodium_100g"] as number) * 1000 * factor) : null; // g→mg
       const name     = p.product_name || p.product_name_en || "Unknown product";
 
       setBarcodeResult({
         description: name,
         items: [{ name: label, calories, protein, carbs, fat }],
-        total: { calories, protein, carbs, fat },
+        total: { calories, protein, carbs, fat, fiber, sugar, sodium },
       });
     } catch {
       setBarcodeError("Network error looking up barcode.");
@@ -231,6 +250,9 @@ export default function FoodEnoughApp() {
           protein: barcodeResult.total.protein,
           carbs: barcodeResult.total.carbs,
           fat: barcodeResult.total.fat,
+          fiber: barcodeResult.total.fiber ?? null,
+          sugar: barcodeResult.total.sugar ?? null,
+          sodium: barcodeResult.total.sodium ?? null,
           parsed_json: JSON.stringify({
             description: barcodeResult.description,
             items: barcodeResult.items,
@@ -251,6 +273,45 @@ export default function FoodEnoughApp() {
       setSaveBarcodeError("Network error. Is the backend running?");
     } finally {
       setSavingBarcode(false);
+    }
+  };
+
+  const handleManualSave = async () => {
+    if (!manualName.trim()) { setManualError("Food name is required."); return; }
+    setManualError("");
+    setManualLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/logs/manual`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({
+          name: manualName.trim(),
+          calories: parseFloat(manualCalories) || 0,
+          protein: parseFloat(manualProtein) || 0,
+          carbs: parseFloat(manualCarbs) || 0,
+          fat: parseFloat(manualFat) || 0,
+          fiber: manualFiber ? parseFloat(manualFiber) : null,
+          sugar: manualSugar ? parseFloat(manualSugar) : null,
+          sodium: manualSodium ? parseFloat(manualSodium) : null,
+        }),
+      });
+      if (res.status === 401) { handleUnauthorized(); return; }
+      if (res.ok) {
+        setManualName(""); setManualCalories(""); setManualProtein("");
+        setManualCarbs(""); setManualFat(""); setManualFiber("");
+        setManualSugar(""); setManualSodium(""); setShowManualAdvanced(false);
+        loadLogs();
+        loadSummary();
+        setManualSuccess(true);
+        setTimeout(() => setManualSuccess(false), 2000);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setManualError(err.detail || "Failed to save. Please try again.");
+      }
+    } catch {
+      setManualError("Connection failed. Please try again.");
+    } finally {
+      setManualLoading(false);
     }
   };
 
@@ -461,17 +522,17 @@ export default function FoodEnoughApp() {
 
         {/* Tab switcher */}
         <div className="flex bg-gray-100 rounded-xl p-1 mb-3 gap-1">
-          {(["text", "photo", "barcode"] as const).map((tab) => (
+          {(["text", "photo", "barcode", "manual"] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setInputTab(tab)}
-              className={`flex-1 py-1.5 text-sm font-medium rounded-lg transition-all capitalize ${
+              className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-all ${
                 inputTab === tab
                   ? "bg-white text-green-700 shadow-sm"
                   : "text-gray-500 hover:text-gray-700"
               }`}
             >
-              {tab === "text" ? "Text" : tab === "photo" ? "📷 Photo" : "🔍 Barcode"}
+              {tab === "text" ? "Text" : tab === "photo" ? "📷" : tab === "barcode" ? "🔍" : "✏️"}
             </button>
           ))}
         </div>
@@ -727,6 +788,74 @@ export default function FoodEnoughApp() {
           </div>
         )}
 
+        {/* Manual tab */}
+        {inputTab === "manual" && (
+          <div className="bg-white rounded-2xl p-4 shadow-sm space-y-3">
+            <input
+              value={manualName}
+              onChange={(e) => setManualName(e.target.value)}
+              placeholder="Food name (e.g. Greek yogurt, whole milk)"
+              className="w-full border border-green-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { label: "Calories (kcal)", value: manualCalories, set: setManualCalories },
+                { label: "Protein (g)", value: manualProtein, set: setManualProtein },
+                { label: "Carbs (g)", value: manualCarbs, set: setManualCarbs },
+                { label: "Fat (g)", value: manualFat, set: setManualFat },
+              ].map(({ label, value, set }) => (
+                <div key={label}>
+                  <label className="text-xs text-gray-400 block mb-0.5">{label}</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={value}
+                    onChange={(e) => set(e.target.value)}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
+                  />
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowManualAdvanced(!showManualAdvanced)}
+              className="text-xs text-green-600 font-medium flex items-center gap-1"
+            >
+              {showManualAdvanced ? "▾" : "▸"} More nutrients
+            </button>
+            {showManualAdvanced && (
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { label: "Fiber (g)", value: manualFiber, set: setManualFiber },
+                  { label: "Sugar (g)", value: manualSugar, set: setManualSugar },
+                  { label: "Sodium (mg)", value: manualSodium, set: setManualSodium },
+                ].map(({ label, value, set }) => (
+                  <div key={label}>
+                    <label className="text-xs text-gray-400 block mb-0.5">{label}</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={value}
+                      onChange={(e) => set(e.target.value)}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+            {manualError && <p className="text-red-500 text-xs">{manualError}</p>}
+            <button
+              onClick={handleManualSave}
+              disabled={manualLoading || !manualName.trim()}
+              className="w-full py-2 bg-gradient-to-r from-green-600 to-green-500 text-white text-sm font-medium rounded-xl shadow-sm disabled:opacity-60 flex items-center justify-center gap-1.5"
+            >
+              {manualLoading ? (
+                <><Loader2 className="w-4 h-4 animate-spin" />Saving…</>
+              ) : manualSuccess ? "✓ Saved!" : "Save Log →"}
+            </button>
+          </div>
+        )}
+
         {mealError && <p className="text-red-500 text-sm mt-2">{mealError}</p>}
         {mealSuccess && <p className="text-green-600 text-sm mt-2 font-medium">✓ Meal logged!</p>}
       </section>
@@ -792,6 +921,19 @@ export default function FoodEnoughApp() {
                           <span className="text-xs px-1.5 py-0.5 bg-amber-50 text-amber-600 rounded-md font-medium">{log.carbs}g C</span>
                           <span className="text-xs px-1.5 py-0.5 bg-orange-50 text-orange-600 rounded-md font-medium">{log.fat}g F</span>
                         </div>
+                        {(log.fiber != null || log.sugar != null || log.sodium != null) && (
+                          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                            {log.fiber != null && (
+                              <span className="text-xs px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded-md font-medium">{log.fiber}g Fiber</span>
+                            )}
+                            {log.sugar != null && (
+                              <span className="text-xs px-1.5 py-0.5 bg-pink-50 text-pink-600 rounded-md font-medium">{log.sugar}g Sugar</span>
+                            )}
+                            {log.sodium != null && (
+                              <span className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded-md font-medium">{log.sodium}mg Na</span>
+                            )}
+                          </div>
+                        )}
                         <div className="text-xs text-gray-400 mt-1">
                           {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </div>
