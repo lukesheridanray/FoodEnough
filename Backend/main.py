@@ -1213,6 +1213,9 @@ def get_logs_week(
             "protein": log.protein,
             "carbs": log.carbs,
             "fat": log.fat,
+            "fiber": log.fiber,
+            "sugar": log.sugar,
+            "sodium": log.sodium,
             "parsed_json": parsed,
         })
 
