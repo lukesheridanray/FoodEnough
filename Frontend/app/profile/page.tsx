@@ -53,7 +53,8 @@ export default function ProfilePage() {
   // Anthropometric / calculator state
   const [age, setAge] = useState<string>("");
   const [sex, setSex] = useState<"M" | "F" | "">("");
-  const [heightCm, setHeightCm] = useState<string>("");
+  const [heightFt, setHeightFt] = useState<string>("");
+  const [heightIn, setHeightIn] = useState<string>("");
   const [activityLevel, setActivityLevel] = useState<string>("");
   // CHANGE 1: goalType persists in localStorage
   const [goalType, setGoalType] = useState<"lose" | "maintain" | "gain">(() => {
@@ -134,7 +135,11 @@ export default function ProfilePage() {
       setFatGoal(data.fat_goal?.toString() ?? "");
       if (data.age) setAge(String(data.age));
       if (data.sex) setSex(data.sex as "M" | "F");
-      if (data.height_cm) setHeightCm(String(data.height_cm));
+      if (data.height_cm) {
+        const totalIn = data.height_cm / 2.54;
+        setHeightFt(String(Math.floor(totalIn / 12)));
+        setHeightIn(String(Math.round(totalIn % 12)));
+      }
       if (data.activity_level) setActivityLevel(data.activity_level);
       if (data.goal_type) setGoalType(data.goal_type as 'lose' | 'maintain' | 'gain');
       // CHANGE 3: detect if profile is incomplete and enter survey mode
@@ -211,7 +216,8 @@ export default function ProfilePage() {
 
   const handleCalculateGoals = async () => {
     setCalcError("");
-    if (!age || !sex || !heightCm || !activityLevel) {
+    const heightCm = heightFt ? ((parseInt(heightFt) * 12 + parseInt(heightIn || "0")) * 2.54) : 0;
+    if (!age || !sex || !heightFt || !activityLevel) {
       setCalcError("Please fill in all fields above.");
       return;
     }
@@ -225,7 +231,7 @@ export default function ProfilePage() {
         body: JSON.stringify({
           age: parseInt(age),
           sex,
-          height_cm: parseFloat(heightCm),
+          height_cm: Math.round(heightCm * 10) / 10,
           activity_level: activityLevel,
           goal_type: goalType,
         }),
@@ -380,20 +386,36 @@ export default function ProfilePage() {
                     />
                   </div>
                   <div className="flex-1">
-                    <label className="text-xs font-medium text-gray-500 uppercase tracking-wider">Height (cm)</label>
-                    <input
-                      type="number"
-                      value={heightCm}
-                      onChange={(e) => setHeightCm(e.target.value)}
-                      placeholder="e.g. 178"
-                      min={100} max={250}
-                      className="mt-1.5 w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
-                    />
+                    <label className="text-xs font-medium text-gray-500 uppercase tracking-wider">Height</label>
+                    <div className="flex gap-2 mt-1.5">
+                      <div className="flex-1 relative">
+                        <input
+                          type="number"
+                          value={heightFt}
+                          onChange={(e) => setHeightFt(e.target.value)}
+                          placeholder="5"
+                          min={3} max={8}
+                          className="w-full border border-gray-200 rounded-xl px-3 py-2.5 pr-7 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
+                        />
+                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">ft</span>
+                      </div>
+                      <div className="flex-1 relative">
+                        <input
+                          type="number"
+                          value={heightIn}
+                          onChange={(e) => setHeightIn(e.target.value)}
+                          placeholder="10"
+                          min={0} max={11}
+                          className="w-full border border-gray-200 rounded-xl px-3 py-2.5 pr-7 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
+                        />
+                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">in</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <button
-                  onClick={() => { if (age && heightCm) setSurveyStep(2); }}
-                  disabled={!age || !heightCm}
+                  onClick={() => { if (age && heightFt) setSurveyStep(2); }}
+                  disabled={!age || !heightFt}
                   className="w-full py-2.5 bg-gradient-to-r from-green-600 to-green-500 text-white text-sm font-semibold rounded-xl shadow-sm disabled:opacity-40"
                 >
                   Continue →
@@ -485,7 +507,7 @@ export default function ProfilePage() {
               <div>
                 <h2 className="text-base font-bold text-green-900">Health Profile</h2>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  {sex === "M" ? "Male" : sex === "F" ? "Female" : ""}{age ? ` · ${age} yrs` : ""}{heightCm ? ` · ${heightCm}cm` : ""}
+                  {sex === "M" ? "Male" : sex === "F" ? "Female" : ""}{age ? ` · ${age} yrs` : ""}{heightFt ? ` · ${heightFt}'${heightIn || "0"}"` : ""}
                   {activityLevel ? ` · ${activityLevel.replace("_", " ")}` : ""}
                 </p>
               </div>

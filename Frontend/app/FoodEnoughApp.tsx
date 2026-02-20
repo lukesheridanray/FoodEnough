@@ -496,13 +496,14 @@ export default function FoodEnoughApp() {
                   />
                 </div>
                 <p className="text-xs text-gray-400 mt-1">
-                  {summary.calories_today} eaten
+                  {summary.calories_today} / {summary.calorie_goal} kcal eaten
                 </p>
               </div>
             )}
 
             {/* Macro bars */}
-            {(summary.protein_today > 0 || summary.carbs_today > 0 || summary.fat_today > 0) && (
+            {(summary.protein_goal || summary.carbs_goal || summary.fat_goal ||
+              summary.protein_today > 0 || summary.carbs_today > 0 || summary.fat_today > 0) && (
               <div className="flex gap-2">
                 {[
                   { label: "Protein", value: summary.protein_today, goal: summary.protein_goal, barColor: "bg-blue-500", textColor: "text-blue-600" },
