@@ -1,8 +1,7 @@
 "use client";
 import { useState, useRef } from "react";
 import { Camera, X, Loader2 } from "lucide-react";
-import { authHeaders } from "../../lib/auth";
-import { API_URL } from "../../lib/config";
+import { apiFetch, UnauthorizedError } from "../../lib/api";
 import { ImageAnalysis } from "../hooks/useFoodLogs";
 
 interface PhotoInputTabProps {
@@ -37,19 +36,18 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
     try {
       const formData = new FormData();
       formData.append("image", file);
-      const res = await fetch(`${API_URL}/parse_log/image`, {
+      const res = await apiFetch("/parse_log/image", {
         method: "POST",
-        headers: authHeaders(),
         body: formData,
       });
-      if (res.status === 401) { onUnauthorized(); return; }
       if (res.ok) {
         setImageAnalysis(await res.json());
       } else {
         const err = await res.json().catch(() => ({}));
         setAnalysisError(err.detail || "Failed to analyze photo. Please try again.");
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { onUnauthorized(); return; }
       setAnalysisError("Network error. Is the backend running?");
     } finally {
       setAnalyzingImage(false);
@@ -76,9 +74,10 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
     setSaveImageError("");
     setSavingImage(true);
     try {
-      const res = await fetch(`${API_URL}/logs/save-parsed`, {
+      const tzOffset = -new Date().getTimezoneOffset();
+      const res = await apiFetch(`/logs/save-parsed?tz_offset_minutes=${tzOffset}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           input_text: `\ud83d\udcf7 ${imageAnalysis.description}`,
           calories: imageAnalysis.total.calories,
@@ -95,7 +94,6 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
           }),
         }),
       });
-      if (res.status === 401) { onUnauthorized(); return; }
       if (res.ok) {
         clearImage();
         onLogged();
@@ -103,7 +101,8 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
         const err = await res.json().catch(() => ({}));
         setSaveImageError(err.detail || "Failed to save. Please try again.");
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { onUnauthorized(); return; }
       setSaveImageError("Network error. Is the backend running?");
     } finally {
       setSavingImage(false);
@@ -141,7 +140,7 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
               <p className="text-sm font-medium text-gray-700 truncate">{imageFile?.name}</p>
               {analyzingImage && (
                 <p className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
-                  <Loader2 className="w-3 h-3 animate-spin" /> Analyzing photo\u2026
+                  <Loader2 className="w-3 h-3 animate-spin" /> Analyzing photo{"\u2026"}
                 </p>
               )}
               {!analyzingImage && imageAnalysis && (
@@ -209,7 +208,7 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
               className="w-full py-2 bg-gradient-to-r from-green-600 to-green-500 text-white text-sm font-medium rounded-xl shadow-sm disabled:opacity-60 flex items-center justify-center gap-1.5"
             >
               {savingImage ? (
-                <><Loader2 className="w-4 h-4 animate-spin" />Saving\u2026</>
+                <><Loader2 className="w-4 h-4 animate-spin" />Saving{"\u2026"}</>
               ) : (
                 "Save Log \u2192"
               )}

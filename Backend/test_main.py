@@ -435,7 +435,8 @@ def _create_fitness_profile(token):
 
 def _create_workout_plan_in_db(token):
     _create_fitness_profile(token)
-    with patch("main.client.chat.completions.create", return_value=_make_openai_response(MOCK_WORKOUT_PLAN_JSON)):
+    with patch("main.anthropic_client", None), \
+         patch("main.client.chat.completions.create", return_value=_make_openai_response(MOCK_WORKOUT_PLAN_JSON)):
         return client.post("/workout-plans/generate", headers=auth_header(token))
 
 
@@ -636,6 +637,7 @@ class TestParseLogImage:
 # POST /workout-plans/generate tests (mocked OpenAI)
 # ---------------------------------------------------------------------------
 class TestGenerateWorkoutPlan:
+    @patch("main.anthropic_client", None)
     @patch("main.client.chat.completions.create", return_value=_make_openai_response(MOCK_WORKOUT_PLAN_JSON))
     def test_generate_plan_success(self, mock_openai):
         token = get_token()
@@ -647,6 +649,7 @@ class TestGenerateWorkoutPlan:
         assert "plan_id" in data
         mock_openai.assert_called_once()
 
+    @patch("main.anthropic_client", None)
     @patch("main.client.chat.completions.create", return_value=_make_openai_response(MOCK_WORKOUT_PLAN_JSON))
     def test_generate_plan_creates_sessions(self, mock_openai):
         token = get_token()
@@ -669,6 +672,7 @@ class TestGenerateWorkoutPlan:
         res = client.post("/workout-plans/generate")
         assert res.status_code in (401, 403)
 
+    @patch("main.anthropic_client", None)
     @patch("main.client.chat.completions.create", return_value=_make_openai_response("not valid json"))
     def test_generate_plan_ai_invalid_json(self, mock_openai):
         token = get_token()
@@ -676,6 +680,7 @@ class TestGenerateWorkoutPlan:
         res = client.post("/workout-plans/generate", headers=auth_header(token))
         assert res.status_code == 500
 
+    @patch("main.anthropic_client", None)
     @patch("main.client.chat.completions.create", return_value=_make_openai_response(MOCK_WORKOUT_PLAN_JSON))
     def test_generate_plan_deactivates_previous(self, mock_openai):
         token = get_token()

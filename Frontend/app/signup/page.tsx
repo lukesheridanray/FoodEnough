@@ -31,13 +31,14 @@ export default function SignupPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(data.detail || "Registration failed");
         return;
       }
+      if (!data.access_token) { setError("Invalid server response."); return; }
       setToken(data.access_token);
-      router.push("/");
+      router.push("/onboarding");
     } catch {
       setError("Connection failed. Please try again.");
     } finally {

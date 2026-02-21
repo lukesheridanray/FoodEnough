@@ -1,8 +1,8 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { getToken, removeToken, authHeaders } from "../../lib/auth";
-import { API_URL } from "../../lib/config";
+import { getToken, removeToken } from "../../lib/auth";
+import { apiFetch, UnauthorizedError } from "../../lib/api";
 
 interface Summary {
   calories_today: number;
@@ -49,9 +49,19 @@ interface Log {
   fiber?: number | null;
   sugar?: number | null;
   sodium?: number | null;
+  meal_type?: string | null;
 }
 
-export type { Summary, ImageItem, ImageAnalysis, BarcodeResult, Log };
+interface Favorite {
+  input_text: string;
+  count: number;
+  avg_calories: number;
+  avg_protein: number;
+  avg_carbs: number;
+  avg_fat: number;
+}
+
+export type { Summary, ImageItem, ImageAnalysis, BarcodeResult, Log, Favorite };
 
 export function useFoodLogs() {
   const [logs, setLogs] = useState<Log[]>([]);
@@ -62,21 +72,22 @@ export function useFoodLogs() {
   const [editText, setEditText] = useState("");
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState("");
+  const [favorites, setFavorites] = useState<Favorite[]>([]);
+  const [deleteError, setDeleteError] = useState("");
   const router = useRouter();
 
   const handleUnauthorized = () => {
-    removeToken();
     router.push("/login");
   };
 
   const loadLogs = async () => {
     try {
       const tzOffset = -new Date().getTimezoneOffset();
-      const res = await fetch(`${API_URL}/logs/today?tz_offset_minutes=${tzOffset}`, { headers: authHeaders() });
-      if (res.status === 401) { handleUnauthorized(); return; }
-      const data = await res.json();
+      const res = await apiFetch(`/logs/today?tz_offset_minutes=${tzOffset}`);
+      const data = await res.json().catch(() => ({ logs: [] }));
       setLogs(data.logs || []);
     } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
       console.error("Error loading logs:", err);
     }
   };
@@ -84,26 +95,37 @@ export function useFoodLogs() {
   const loadSummary = async () => {
     try {
       const tzOffset = -new Date().getTimezoneOffset();
-      const res = await fetch(`${API_URL}/summary/today?tz_offset_minutes=${tzOffset}`, { headers: authHeaders() });
-      if (res.status === 401) { handleUnauthorized(); return; }
-      if (res.ok) setSummary(await res.json());
-    } catch {
+      const res = await apiFetch(`/summary/today?tz_offset_minutes=${tzOffset}`);
+      if (res.ok) setSummary(await res.json().catch(() => null));
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
       // non-fatal
     } finally {
       setSummaryLoading(false);
     }
   };
 
+  const loadFavorites = async () => {
+    try {
+      const res = await apiFetch("/logs/favorites");
+      if (res.ok) {
+        const data = await res.json().catch(() => ({ favorites: [] }));
+        setFavorites(data.favorites || []);
+      }
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
+      // non-fatal
+    }
+  };
+
   useEffect(() => {
     if (!getToken()) { router.push("/login"); return; }
-    loadLogs();
-    loadSummary();
+    Promise.all([loadLogs(), loadSummary(), loadFavorites()]);
   }, []);
 
   const handleExport = async () => {
     try {
-      const res = await fetch(`${API_URL}/logs/export`, { headers: authHeaders() });
-      if (res.status === 401) { handleUnauthorized(); return; }
+      const res = await apiFetch("/logs/export");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -112,6 +134,7 @@ export function useFoodLogs() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
       console.error("Export failed:", err);
     }
   };
@@ -121,12 +144,11 @@ export function useFoodLogs() {
     setEditError("");
     setEditLoading(true);
     try {
-      const res = await fetch(`${API_URL}/logs/${logId}`, {
+      const res = await apiFetch(`/logs/${logId}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ input_text: editText }),
       });
-      if (res.status === 401) { handleUnauthorized(); return; }
       if (res.ok) {
         setEditingId(null);
         setEditText("");
@@ -137,7 +159,8 @@ export function useFoodLogs() {
         const err = await res.json().catch(() => ({}));
         setEditError(err.detail || "Failed to save. Please try again.");
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
       setEditError("Connection failed. Please try again.");
     } finally {
       setEditLoading(false);
@@ -145,12 +168,43 @@ export function useFoodLogs() {
   };
 
   const handleDelete = async (logId: number) => {
-    const res = await fetch(`${API_URL}/logs/${logId}`, {
-      method: "DELETE",
-      headers: authHeaders(),
-    });
-    if (res.status === 401) { handleUnauthorized(); return; }
-    if (res.ok) { setDeleteConfirmId(null); loadLogs(); loadSummary(); }
+    setDeleteError("");
+    try {
+      const res = await apiFetch(`/logs/${logId}`, { method: "DELETE" });
+      if (res.ok) { setDeleteConfirmId(null); loadLogs(); loadSummary(); }
+      else { setDeleteError("Failed to delete. Please try again."); }
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
+      setDeleteError("Connection failed. Please try again.");
+    }
+  };
+
+  const handleQuickAdd = async (fav: Favorite) => {
+    try {
+      const tzOffset = -new Date().getTimezoneOffset();
+      const res = await apiFetch(`/logs/save-parsed?tz_offset_minutes=${tzOffset}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          input_text: fav.input_text,
+          calories: Math.round(fav.avg_calories),
+          protein: Math.round(fav.avg_protein),
+          carbs: Math.round(fav.avg_carbs),
+          fat: Math.round(fav.avg_fat),
+          fiber: null,
+          sugar: null,
+          sodium: null,
+          parsed_json: null,
+        }),
+      });
+      if (res.ok) {
+        loadLogs();
+        loadSummary();
+        loadFavorites();
+      }
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
+    }
   };
 
   const handleLogout = () => {
@@ -171,11 +225,16 @@ export function useFoodLogs() {
     editLoading,
     editError,
     setEditError,
+    favorites,
+    deleteError,
+    setDeleteError,
     loadLogs,
     loadSummary,
+    loadFavorites,
     handleExport,
     handleEditSave,
     handleDelete,
+    handleQuickAdd,
     handleLogout,
     handleUnauthorized,
   };

@@ -1,7 +1,7 @@
 "use client";
 import BottomNav from "./BottomNav";
 
-const QUIZ_STEPS = [
+export const QUIZ_STEPS = [
   {
     key: "gym_access",
     question: "Where do you work out?",
@@ -9,6 +9,7 @@ const QUIZ_STEPS = [
       { value: "full_gym", label: "\ud83c\udfcb\ufe0f Full gym", description: "Barbells, machines & cables" },
       { value: "home_gym", label: "\ud83c\udfe0 Home gym", description: "Dumbbells & resistance bands" },
       { value: "bodyweight", label: "\ud83e\udd38 Bodyweight only", description: "No equipment needed" },
+      { value: "kettlebell", label: "\ud83c\udfcb\ufe0f Kettlebell", description: "Kettlebells & minimal equipment" },
     ],
   },
   {
@@ -62,6 +63,7 @@ interface FitnessQuizProps {
   profileError: string;
   onQuizSelect: (key: string, value: any) => void;
   onSaveProfile: () => void;
+  hideBottomNav?: boolean;
 }
 
 export default function FitnessQuiz({
@@ -74,6 +76,7 @@ export default function FitnessQuiz({
   profileError,
   onQuizSelect,
   onSaveProfile,
+  hideBottomNav = false,
 }: FitnessQuizProps) {
   const isLimitationsStep = quizStep === QUIZ_STEPS.length;
   const currentQuestion = !isLimitationsStep ? QUIZ_STEPS[quizStep] : null;
@@ -162,7 +165,7 @@ export default function FitnessQuiz({
         )}
       </section>
 
-      <BottomNav />
+      {!hideBottomNav && <BottomNav />}
     </div>
   );
 }

@@ -1,7 +1,6 @@
 "use client";
 import { useState, useRef } from "react";
-import { authHeaders } from "../../lib/auth";
-import { API_URL } from "../../lib/config";
+import { apiFetch, UnauthorizedError } from "../../lib/api";
 
 interface TextInputTabProps {
   onLogged: () => void;
@@ -26,12 +25,12 @@ export default function TextInputTab({ onLogged, onUnauthorized, onSwitchToBarco
           setMealError("");
           setLogging(true);
           try {
-            const res = await fetch(`${API_URL}/save_log`, {
+            const tzOffset = -new Date().getTimezoneOffset();
+            const res = await apiFetch(`/save_log?tz_offset_minutes=${tzOffset}`, {
               method: "POST",
-              headers: { "Content-Type": "application/json", ...authHeaders() },
+              headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ input_text: input }),
             });
-            if (res.status === 401) { onUnauthorized(); return; }
             if (res.ok) {
               if (mealInputRef.current) mealInputRef.current.value = "";
               onLogged();
@@ -41,6 +40,7 @@ export default function TextInputTab({ onLogged, onUnauthorized, onSwitchToBarco
               setMealError("Failed to log meal. Please try again.");
             }
           } catch (err) {
+            if (err instanceof UnauthorizedError) { onUnauthorized(); return; }
             console.error("Error saving meal:", err);
             setMealError("Connection failed. Please try again.");
           } finally {

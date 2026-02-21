@@ -1,8 +1,8 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { getToken, removeToken, authHeaders } from "../../lib/auth";
-import { API_URL } from "../../lib/config";
+import { getToken, removeToken, safeGetItem, safeSetItem } from "../../lib/auth";
+import { apiFetch, UnauthorizedError } from "../../lib/api";
 
 interface Profile {
   email: string;
@@ -61,11 +61,12 @@ export function useProfile() {
   const [sex, setSex] = useState<"M" | "F" | "">("");
   const [heightFt, setHeightFt] = useState<string>("");
   const [heightIn, setHeightIn] = useState<string>("");
+  const [heightUnit, setHeightUnit] = useState<"imperial" | "metric">("imperial");
+  const [heightCm, setHeightCm] = useState<string>("");
   const [surveyWeight, setSurveyWeight] = useState<string>("");
   const [activityLevel, setActivityLevel] = useState<string>("");
   const [goalType, setGoalType] = useState<"lose" | "maintain" | "gain">(() => {
-    if (typeof window === 'undefined') return 'maintain';
-    return (localStorage.getItem('goalType') as 'lose' | 'maintain' | 'gain') ?? 'maintain';
+    return (safeGetItem('goalType') as 'lose' | 'maintain' | 'gain') ?? 'maintain';
   });
   const [surveyMode, setSurveyMode] = useState(false);
   const [surveyStep, setSurveyStep] = useState(0);
@@ -83,8 +84,7 @@ export function useProfile() {
   const [weightHistory, setWeightHistory] = useState<WeightEntry[]>([]);
   const [weightHistoryError, setWeightHistoryError] = useState("");
   const [weightUnit, setWeightUnit] = useState<'lbs' | 'kg'>(() => {
-    if (typeof window === 'undefined') return 'lbs';
-    return (localStorage.getItem('weightUnit') as 'lbs' | 'kg') ?? 'lbs';
+    return (safeGetItem('weightUnit') as 'lbs' | 'kg') ?? 'lbs';
   });
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -92,7 +92,6 @@ export function useProfile() {
   const [deleteAccountError, setDeleteAccountError] = useState("");
 
   const handleUnauthorized = () => {
-    removeToken();
     router.push("/login");
   };
 
@@ -105,14 +104,13 @@ export function useProfile() {
 
   const toggleWeightUnit = (unit: 'lbs' | 'kg') => {
     setWeightUnit(unit);
-    localStorage.setItem('weightUnit', unit);
+    safeSetItem('weightUnit', unit);
   };
 
   const loadProfile = async () => {
     try {
-      const res = await fetch(`${API_URL}/profile`, { headers: authHeaders() });
-      if (res.status === 401) { handleUnauthorized(); return; }
-      const data: Profile = await res.json();
+      const res = await apiFetch("/profile");
+      const data: Profile = await res.json().catch(() => ({} as Profile));
       setProfile(data);
       setCalorieGoal(data.calorie_goal?.toString() ?? "");
       setProteinGoal(data.protein_goal?.toString() ?? "");
@@ -124,24 +122,26 @@ export function useProfile() {
         const totalIn = data.height_cm / 2.54;
         setHeightFt(String(Math.floor(totalIn / 12)));
         setHeightIn(String(Math.round(totalIn % 12)));
+        setHeightCm(String(Math.round(data.height_cm)));
       }
       if (data.activity_level) setActivityLevel(data.activity_level);
       if (data.goal_type) setGoalType(data.goal_type as 'lose' | 'maintain' | 'gain');
       const profileComplete = !!(data.age && data.sex && data.height_cm && data.activity_level);
       setSurveyMode(!profileComplete);
-    } catch {
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
       // non-fatal
     }
   };
 
   const loadWeightHistory = async () => {
     try {
-      const res = await fetch(`${API_URL}/weight/history`, { headers: authHeaders() });
-      if (res.status === 401) { handleUnauthorized(); return; }
+      const res = await apiFetch("/weight/history");
       if (!res.ok) { setWeightHistoryError("Failed to load weight history."); return; }
-      const data = await res.json();
+      const data = await res.json().catch(() => ({ entries: [] }));
       setWeightHistory((data.entries || []).slice().reverse());
-    } catch {
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
       setWeightHistoryError("Network error loading weight history.");
     }
   };
@@ -149,12 +149,10 @@ export function useProfile() {
   const loadTodaySummary = async () => {
     try {
       const tzOffset = -new Date().getTimezoneOffset();
-      const summaryRes = await fetch(
-        `${API_URL}/summary/today?tz_offset_minutes=${tzOffset}`,
-        { headers: authHeaders() }
-      );
-      if (summaryRes.ok) setTodaySummary(await summaryRes.json());
-    } catch {
+      const summaryRes = await apiFetch(`/summary/today?tz_offset_minutes=${tzOffset}`);
+      if (summaryRes.ok) setTodaySummary(await summaryRes.json().catch(() => null));
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
       // non-fatal
     }
   };
@@ -166,12 +164,22 @@ export function useProfile() {
 
   const handleCalculateGoals = async () => {
     setCalcError("");
-    const heightCm = heightFt ? ((parseInt(heightFt) * 12 + parseInt(heightIn || "0")) * 2.54) : 0;
-    if (!age || !sex || !heightFt || !activityLevel) {
+    const computedHeightCm = heightUnit === "metric"
+      ? parseFloat(heightCm) || 0
+      : heightFt ? ((parseInt(heightFt) * 12 + parseInt(heightIn || "0")) * 2.54) : 0;
+    if (!age || !sex || !activityLevel) {
       setCalcError("Please fill in all fields above.");
       return;
     }
-    localStorage.setItem('goalType', goalType);
+    if (heightUnit === "imperial" && !heightFt) {
+      setCalcError("Please fill in all fields above.");
+      return;
+    }
+    if (heightUnit === "metric" && !heightCm) {
+      setCalcError("Please fill in all fields above.");
+      return;
+    }
+    safeSetItem('goalType', goalType);
     setCalculating(true);
     try {
       if (surveyWeight) {
@@ -179,26 +187,28 @@ export function useProfile() {
           ? parseFloat(surveyWeight) * 2.20462
           : parseFloat(surveyWeight);
         if (wLbs > 0) {
-          await fetch(`${API_URL}/weight`, {
+          const weightRes = await apiFetch("/weight", {
             method: "POST",
-            headers: { "Content-Type": "application/json", ...authHeaders() },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ weight_lbs: Math.round(wLbs * 10) / 10 }),
           });
+          if (!weightRes.ok) {
+            console.error("Failed to save weight:", await weightRes.text());
+          }
           loadWeightHistory();
         }
       }
-      const res = await fetch(`${API_URL}/profile/calculate-goals`, {
+      const res = await apiFetch("/profile/calculate-goals", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           age: parseInt(age),
           sex,
-          height_cm: Math.round(heightCm * 10) / 10,
+          height_cm: Math.round(computedHeightCm * 10) / 10,
           activity_level: activityLevel,
           goal_type: goalType,
         }),
       });
-      if (res.status === 401) { removeToken(); router.push("/login"); return; }
       if (res.ok) {
         const goals = await res.json();
         setCalculatedGoals(goals);
@@ -212,7 +222,8 @@ export function useProfile() {
         const err = await res.json().catch(() => ({}));
         setCalcError(err.detail || "Calculation failed. Please try again.");
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
       setCalcError("Connection failed. Please try again.");
     } finally {
       setCalculating(false);
@@ -228,22 +239,22 @@ export function useProfile() {
     setWeightSuccess(false);
     setLoggingWeight(true);
     try {
-      const res = await fetch(`${API_URL}/weight`, {
+      const res = await apiFetch("/weight", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ weight_lbs: lbs }),
       });
-      if (res.status === 401) { handleUnauthorized(); return; }
       if (res.ok) {
         setWeightInput("");
         setWeightSuccess(true);
         loadWeightHistory();
         setTimeout(() => setWeightSuccess(false), 3000);
       } else {
-        const err = await res.json();
+        const err = await res.json().catch(() => ({}));
         setWeightError(parseApiError(err.detail) || "Failed to log weight.");
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
       setWeightError("Connection failed. Please try again.");
     } finally {
       setLoggingWeight(false);
@@ -254,10 +265,7 @@ export function useProfile() {
     setDeleteAccountError("");
     setDeletingAccount(true);
     try {
-      const res = await fetch(`${API_URL}/auth/account`, {
-        method: "DELETE",
-        headers: authHeaders(),
-      });
+      const res = await apiFetch("/auth/account", { method: "DELETE" });
       if (res.ok) {
         removeToken();
         router.push("/login");
@@ -266,7 +274,8 @@ export function useProfile() {
         setDeleteAccountError(err.detail || "Failed to delete account. Please try again.");
         setShowDeleteConfirm(false);
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
       setDeleteAccountError("Connection failed. Please try again.");
       setShowDeleteConfirm(false);
     } finally {
@@ -294,6 +303,10 @@ export function useProfile() {
     setHeightFt,
     heightIn,
     setHeightIn,
+    heightUnit,
+    setHeightUnit,
+    heightCm,
+    setHeightCm,
     surveyWeight,
     setSurveyWeight,
     activityLevel,

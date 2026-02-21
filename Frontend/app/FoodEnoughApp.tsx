@@ -9,8 +9,7 @@ import PhotoInputTab from "./components/PhotoInputTab";
 import ManualInputTab from "./components/ManualInputTab";
 import LogList from "./components/LogList";
 import { useFoodLogs, BarcodeResult } from "./hooks/useFoodLogs";
-import { authHeaders } from "../lib/auth";
-import { API_URL } from "../lib/config";
+import { apiFetch, UnauthorizedError } from "../lib/api";
 
 export default function FoodEnoughApp() {
   const {
@@ -26,11 +25,15 @@ export default function FoodEnoughApp() {
     editLoading,
     editError,
     setEditError,
+    favorites,
+    deleteError,
     loadLogs,
     loadSummary,
+    loadFavorites,
     handleExport,
     handleEditSave,
     handleDelete,
+    handleQuickAdd,
     handleLogout,
     handleUnauthorized,
   } = useFoodLogs();
@@ -59,7 +62,7 @@ export default function FoodEnoughApp() {
       const res = await fetch(
         `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json`
       );
-      const data = await res.json();
+      const data = await res.json().catch(() => ({ status: 0 }));
       if (data.status !== 1 || !data.product) {
         setBarcodeError("Product not found in database.");
         return;
@@ -102,9 +105,10 @@ export default function FoodEnoughApp() {
     setSaveBarcodeError("");
     setSavingBarcode(true);
     try {
-      const res = await fetch(`${API_URL}/logs/save-parsed`, {
+      const tzOffset = -new Date().getTimezoneOffset();
+      const res = await apiFetch(`/logs/save-parsed?tz_offset_minutes=${tzOffset}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           input_text: `\ud83d\udd0d ${barcodeResult.description}`,
           calories: barcodeResult.total.calories,
@@ -121,16 +125,17 @@ export default function FoodEnoughApp() {
           }),
         }),
       });
-      if (res.status === 401) { handleUnauthorized(); return; }
       if (res.ok) {
         clearBarcode();
         loadLogs();
         loadSummary();
+        loadFavorites();
       } else {
         const err = await res.json().catch(() => ({}));
         setSaveBarcodeError(err.detail || "Failed to save. Please try again.");
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
       setSaveBarcodeError("Network error. Is the backend running?");
     } finally {
       setSavingBarcode(false);
@@ -140,6 +145,7 @@ export default function FoodEnoughApp() {
   const onLogged = () => {
     loadLogs();
     loadSummary();
+    loadFavorites();
   };
 
   return (
@@ -157,6 +163,24 @@ export default function FoodEnoughApp() {
       </header>
 
       <SummaryCard summary={summary} summaryLoading={summaryLoading} />
+
+      {/* Quick-add favorites */}
+      {favorites.length > 0 && (
+        <section className="px-5 mt-3">
+          <p className="text-xs font-medium text-gray-400 mb-1.5">Quick add</p>
+          <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1" style={{ scrollbarWidth: "none" }}>
+            {favorites.map((fav) => (
+              <button
+                key={fav.input_text}
+                onClick={() => handleQuickAdd(fav)}
+                className="flex-shrink-0 bg-white border border-green-200 rounded-full px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-50 transition-colors shadow-sm"
+              >
+                {fav.input_text.replace(/^[\ud83d\udcf7\ud83d\udd0d\u270f\ufe0f] ?/, "")} <span className="text-gray-400 ml-1">{Math.round(fav.avg_calories)} kcal</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Add Meal */}
       <section className="px-5 mt-4">
@@ -216,7 +240,7 @@ export default function FoodEnoughApp() {
             {lookingUpBarcode && (
               <div className="py-6 flex items-center justify-center gap-2 text-sm text-gray-500">
                 <Loader2 className="w-4 h-4 animate-spin text-green-600" />
-                Looking up product\u2026
+                Looking up product{"\u2026"}
               </div>
             )}
             {barcodeError && !lookingUpBarcode && (
@@ -280,7 +304,7 @@ export default function FoodEnoughApp() {
                   className="w-full py-2 bg-gradient-to-r from-green-600 to-green-500 text-white text-sm font-medium rounded-xl shadow-sm disabled:opacity-60 flex items-center justify-center gap-1.5"
                 >
                   {savingBarcode ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" />Saving\u2026</>
+                    <><Loader2 className="w-4 h-4 animate-spin" />Saving{"\u2026"}</>
                   ) : (
                     "Save Log \u2192"
                   )}
@@ -309,6 +333,7 @@ export default function FoodEnoughApp() {
         editLoading={editLoading}
         editError={editError}
         setEditError={setEditError}
+        deleteError={deleteError}
         onEditSave={handleEditSave}
         onDelete={handleDelete}
         onExport={handleExport}

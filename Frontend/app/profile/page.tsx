@@ -13,18 +13,16 @@ export default function ProfilePage() {
   const router = useRouter();
   const p = useProfile();
 
-  if (p.loading) return <div className="p-6 text-gray-500">Loading\u2026</div>;
+  if (p.loading) return <div className="p-6 text-gray-500">Loading{"\u2026"}</div>;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-green-100 to-green-50 pb-24">
-      {/* CHANGE 7: safe area inset */}
       <div style={{ height: 'max(24px, env(safe-area-inset-top))' }} />
       <header className="px-5 py-3">
         <h1 className="text-xl font-bold text-green-900">Profile & Settings</h1>
         {p.profile && <p className="text-sm text-gray-500">{p.profile.email}</p>}
       </header>
 
-      {/* CHANGE 5: Health Profile -- Survey or Summary */}
       {p.surveyMode ? (
         <HealthSurvey
           surveyStep={p.surveyStep}
@@ -37,6 +35,10 @@ export default function ProfilePage() {
           setHeightFt={p.setHeightFt}
           heightIn={p.heightIn}
           setHeightIn={p.setHeightIn}
+          heightUnit={p.heightUnit}
+          setHeightUnit={p.setHeightUnit}
+          heightCm={p.heightCm}
+          setHeightCm={p.setHeightCm}
           surveyWeight={p.surveyWeight}
           setSurveyWeight={p.setSurveyWeight}
           weightUnit={p.weightUnit}
@@ -50,7 +52,6 @@ export default function ProfilePage() {
           onCalculateGoals={p.handleCalculateGoals}
         />
       ) : (
-        /* -- PROFILE COMPLETE -- Summary card -- */
         <section className="px-5 mt-6">
           <div className="bg-white rounded-2xl shadow-sm p-5">
             <div className="flex items-start justify-between mb-3">
@@ -69,7 +70,6 @@ export default function ProfilePage() {
               </button>
             </div>
 
-            {/* Goals grid */}
             <div className="grid grid-cols-2 gap-2">
               {[
                 { label: "Calories", value: p.calorieGoal ? `${p.calorieGoal} kcal` : "\u2014", color: "text-green-700" },
@@ -98,7 +98,6 @@ export default function ProfilePage() {
       )}
 
 
-      {/* Today's Progress */}
       {p.todaySummary && (p.todaySummary.calorie_goal || p.todaySummary.protein_goal) && (
         <GoalProgress todaySummary={p.todaySummary} goalType={p.goalType} />
       )}
@@ -129,7 +128,6 @@ export default function ProfilePage() {
         </button>
       </section>
 
-      {/* Delete Account */}
       <section className="px-5 mt-3 pb-4">
         {!p.showDeleteConfirm ? (
           <button

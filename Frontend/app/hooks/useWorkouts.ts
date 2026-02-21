@@ -1,8 +1,9 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { getToken, removeToken, authHeaders } from "../../lib/auth";
-import { API_URL } from "../../lib/config";
+import { getToken } from "../../lib/auth";
+import { apiFetch, UnauthorizedError } from "../../lib/api";
+import { QUIZ_STEPS } from "../components/FitnessQuiz";
 
 interface FitnessProfile {
   gym_access: string;
@@ -80,7 +81,6 @@ export function useWorkouts() {
   const [manualSuccess, setManualSuccess] = useState(false);
 
   const handleUnauthorized = () => {
-    removeToken();
     router.push("/login");
   };
 
@@ -93,16 +93,16 @@ export function useWorkouts() {
 
   const loadActivePlan = async () => {
     try {
-      const res = await fetch(`${API_URL}/workout-plans/active`, { headers: authHeaders() });
-      if (res.status === 401) { handleUnauthorized(); return; }
-      const data = await res.json();
+      const res = await apiFetch("/workout-plans/active");
+      const data = await res.json().catch(() => ({}));
       if (data.plan) {
         setActivePlan(data.plan);
         setExpandedWeek(findCurrentWeek(data.plan));
       } else {
         setActivePlan(null);
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
       // non-fatal
     }
   };
@@ -112,14 +112,12 @@ export function useWorkouts() {
     const init = async () => {
       try {
         const [profileRes, planRes] = await Promise.all([
-          fetch(`${API_URL}/fitness-profile`, { headers: authHeaders() }),
-          fetch(`${API_URL}/workout-plans/active`, { headers: authHeaders() }),
+          apiFetch("/fitness-profile"),
+          apiFetch("/workout-plans/active"),
         ]);
-        if (profileRes.status === 401) { handleUnauthorized(); return; }
-        if (planRes.status === 401) { handleUnauthorized(); return; }
 
-        const profileData = await profileRes.json();
-        const planData = await planRes.json();
+        const profileData = await profileRes.json().catch(() => ({}));
+        const planData = await planRes.json().catch(() => ({}));
 
         if (profileData.profile) {
           setFitnessProfile(profileData.profile);
@@ -133,7 +131,8 @@ export function useWorkouts() {
           setActivePlan(planData.plan);
           setExpandedWeek(findCurrentWeek(planData.plan));
         }
-      } catch {
+      } catch (err) {
+        if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
         // non-fatal
       } finally {
         setLoading(false);
@@ -142,13 +141,15 @@ export function useWorkouts() {
     init();
   }, []);
 
+  const lastQuizStepIndex = QUIZ_STEPS.length - 1;
+
   const handleQuizSelect = (key: string, value: any) => {
     const updated = { ...quizAnswers, [key]: value };
     setQuizAnswers(updated);
-    if (quizStep < 4) {
+    if (quizStep < lastQuizStepIndex) {
       setQuizStep((s) => s + 1);
     } else {
-      setQuizStep(5);
+      setQuizStep(QUIZ_STEPS.length);
     }
   };
 
@@ -157,12 +158,11 @@ export function useWorkouts() {
     setProfileError("");
     try {
       const body = { ...quizAnswers, limitations: limitations.trim() || null };
-      const res = await fetch(`${API_URL}/fitness-profile`, {
+      const res = await apiFetch("/fitness-profile", {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (res.status === 401) { handleUnauthorized(); return; }
       if (res.ok) {
         setFitnessProfile(body as FitnessProfile);
         setQuizMode(false);
@@ -170,7 +170,8 @@ export function useWorkouts() {
       } else {
         setProfileError("Failed to save preferences. Please try again.");
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
       setProfileError("Connection failed. Please try again.");
     } finally {
       setSavingProfile(false);
@@ -183,13 +184,11 @@ export function useWorkouts() {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 120_000);
     try {
-      const res = await fetch(`${API_URL}/workout-plans/generate`, {
+      const res = await apiFetch("/workout-plans/generate", {
         method: "POST",
-        headers: authHeaders(),
         signal: controller.signal,
       });
       clearTimeout(timeout);
-      if (res.status === 401) { handleUnauthorized(); return; }
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         setPlanError(err.detail || "Failed to generate plan. Please try again.");
@@ -198,6 +197,7 @@ export function useWorkouts() {
       await loadActivePlan();
     } catch (err: any) {
       clearTimeout(timeout);
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
       if (err?.name === "AbortError") {
         setPlanError("Generation timed out. Please try again.");
       } else {
@@ -211,11 +211,7 @@ export function useWorkouts() {
   const handleCompleteSession = async (sessionId: number) => {
     setCompletingSession(sessionId);
     try {
-      const res = await fetch(`${API_URL}/plan-sessions/${sessionId}/complete`, {
-        method: "PUT",
-        headers: authHeaders(),
-      });
-      if (res.status === 401) { handleUnauthorized(); return; }
+      const res = await apiFetch(`/plan-sessions/${sessionId}/complete`, { method: "PUT" });
       if (res.ok) {
         setActivePlan((prev) => {
           if (!prev) return prev;
@@ -233,7 +229,8 @@ export function useWorkouts() {
         });
         loadActivePlan();
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
       // non-fatal
     } finally {
       setCompletingSession(null);
@@ -245,18 +242,15 @@ export function useWorkouts() {
     setAbandoningPlan(true);
     setAbandonError("");
     try {
-      const res = await fetch(`${API_URL}/workout-plans/${activePlan.id}`, {
-        method: "DELETE",
-        headers: authHeaders(),
-      });
-      if (res.status === 401) { handleUnauthorized(); return; }
+      const res = await apiFetch(`/workout-plans/${activePlan.id}`, { method: "DELETE" });
       if (res.ok) {
         setActivePlan(null);
         setShowAbandonConfirm(false);
       } else {
         setAbandonError("Failed to abandon plan. Please try again.");
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
       setAbandonError("Connection failed. Please try again.");
     } finally {
       setAbandoningPlan(false);
@@ -270,12 +264,11 @@ export function useWorkouts() {
     setManualSuccess(false);
     setLoggingManual(true);
     try {
-      const res = await fetch(`${API_URL}/workouts`, {
+      const res = await apiFetch("/workouts", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: manualName.trim(), notes: manualNotes.trim() || null }),
       });
-      if (res.status === 401) { handleUnauthorized(); return; }
       if (res.ok) {
         setManualName("");
         setManualNotes("");
@@ -284,7 +277,8 @@ export function useWorkouts() {
       } else {
         setManualError("Failed to log workout.");
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
       setManualError("Connection failed. Please try again.");
     } finally {
       setLoggingManual(false);

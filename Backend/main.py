@@ -9,7 +9,7 @@ from fastapi import FastAPI, Depends, HTTPException, Query, Request, File, Uploa
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy import create_engine, Column, Integer, Float, DateTime, Text, String, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, Float, DateTime, Text, String, ForeignKey, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from datetime import datetime, timedelta, timezone
@@ -20,6 +20,7 @@ import bcrypt
 import jwt as pyjwt
 from jwt.exceptions import PyJWTError
 from openai import OpenAI
+import anthropic
 import os
 import json
 import csv
@@ -52,6 +53,8 @@ JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
 client = OpenAI(api_key=OPENAI_API_KEY)
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 security = HTTPBearer(auto_error=False)
 limiter = Limiter(key_func=get_remote_address)
 
@@ -111,6 +114,7 @@ class FoodLog(Base):
     fiber = Column(Float, nullable=True)
     sugar = Column(Float, nullable=True)
     sodium = Column(Float, nullable=True)    # milligrams
+    meal_type = Column(String, nullable=True)  # breakfast, lunch, snack, dinner
     parsed_json = Column(Text)
     user = relationship("User", back_populates="logs")
 
@@ -190,7 +194,8 @@ class PasswordResetToken(Base):
     used = Column(Integer, default=0)  # 0 = unused, 1 = used
 
 
-Base.metadata.create_all(bind=engine)
+if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+    Base.metadata.create_all(bind=engine)
 
 
 # ============================================================
@@ -507,11 +512,18 @@ class ProfileUpdate(BaseModel):
     activity_level: Optional[str] = None
     goal_type: Optional[str] = None  # 'lose', 'maintain', 'gain'
 
-    @field_validator("calorie_goal", "protein_goal", "carbs_goal", "fat_goal")
+    @field_validator("calorie_goal")
     @classmethod
-    def goals_positive(cls, v: Optional[int]) -> Optional[int]:
-        if v is not None and v <= 0:
-            raise ValueError("Goal values must be greater than 0")
+    def calorie_goal_valid(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and (v <= 0 or v > 20000):
+            raise ValueError("calorie_goal must be between 1 and 20000")
+        return v
+
+    @field_validator("protein_goal", "carbs_goal", "fat_goal")
+    @classmethod
+    def macro_goals_valid(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and (v <= 0 or v > 5000):
+            raise ValueError("Macro goal must be between 1 and 5000")
         return v
 
     @field_validator("age")
@@ -578,11 +590,18 @@ class ParsedLogInput(BaseModel):
     sodium: Optional[float] = None
     parsed_json: Optional[str] = Field(default=None, max_length=10000)
 
-    @field_validator("calories", "protein", "carbs", "fat")
+    @field_validator("calories")
+    @classmethod
+    def calories_valid(cls, v: float) -> float:
+        if v < 0 or v > 50000:
+            raise ValueError("Calories must be between 0 and 50000")
+        return v
+
+    @field_validator("protein", "carbs", "fat")
     @classmethod
     def macros_non_negative(cls, v: float) -> float:
-        if v < 0:
-            raise ValueError("Macro values must be non-negative")
+        if v < 0 or v > 10000:
+            raise ValueError("Macro values must be between 0 and 10000")
         return v
 
     @field_validator("fiber", "sugar", "sodium")
@@ -610,11 +629,18 @@ class ManualLogInput(BaseModel):
             raise ValueError("name cannot be blank")
         return v
 
-    @field_validator("calories", "protein", "carbs", "fat")
+    @field_validator("calories")
+    @classmethod
+    def calories_valid(cls, v: float) -> float:
+        if v < 0 or v > 50000:
+            raise ValueError("Calories must be between 0 and 50000")
+        return v
+
+    @field_validator("protein", "carbs", "fat")
     @classmethod
     def macros_non_negative(cls, v: float) -> float:
-        if v < 0:
-            raise ValueError("Macro values must be non-negative")
+        if v < 0 or v > 10000:
+            raise ValueError("Macro values must be between 0 and 10000")
         return v
 
     @field_validator("fiber", "sugar", "sodium")
@@ -752,6 +778,23 @@ def delete_account(
 
 
 # ============================================================
+# Meal type inference helper
+# ============================================================
+def infer_meal_type(timestamp: datetime = None, tz_offset_minutes: int = 0) -> str:
+    """Infer meal type from local hour: breakfast (<10), lunch (10-14), snack (14-17), dinner (17+)."""
+    ts = timestamp or datetime.utcnow()
+    local_hour = (ts + timedelta(minutes=tz_offset_minutes)).hour
+    if local_hour < 10:
+        return "breakfast"
+    elif local_hour < 14:
+        return "lunch"
+    elif local_hour < 17:
+        return "snack"
+    else:
+        return "dinner"
+
+
+# ============================================================
 # POST /save_log  — parse and persist (protected)
 # ============================================================
 @app.post("/save_log")
@@ -759,6 +802,7 @@ def delete_account(
 def save_log(
     request: Request,
     data: FoodInput,
+    tz_offset_minutes: int = Query(0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -783,6 +827,7 @@ def save_log(
             print("JSON parsing failed:", e)
             raise HTTPException(status_code=500, detail="AI response was not valid JSON")
 
+        now = datetime.utcnow()
         log = FoodLog(
             user_id=current_user.id,
             input_text=data.input_text,
@@ -791,6 +836,7 @@ def save_log(
             protein=total["protein"],
             carbs=total["carbs"],
             fat=total["fat"],
+            meal_type=infer_meal_type(now, tz_offset_minutes),
         )
 
         db.add(log)
@@ -918,6 +964,7 @@ Rules:
 async def save_log_from_image(
     request: Request,
     image: UploadFile = File(...),
+    tz_offset_minutes: int = Query(0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -970,6 +1017,7 @@ async def save_log_from_image(
 
         description = parsed.get("description", "Photo log")
 
+        now = datetime.utcnow()
         log = FoodLog(
             user_id=current_user.id,
             input_text=f"📷 {description}",
@@ -978,6 +1026,7 @@ async def save_log_from_image(
             protein=total["protein"],
             carbs=total["carbs"],
             fat=total["fat"],
+            meal_type=infer_meal_type(now, tz_offset_minutes),
         )
         db.add(log)
         db.commit()
@@ -1069,9 +1118,11 @@ async def parse_log_from_image(
 def save_parsed_log(
     request: Request,
     data: ParsedLogInput,
+    tz_offset_minutes: int = Query(0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    now = datetime.utcnow()
     log = FoodLog(
         user_id=current_user.id,
         input_text=data.input_text,
@@ -1083,6 +1134,7 @@ def save_parsed_log(
         fiber=data.fiber,
         sugar=data.sugar,
         sodium=data.sodium,
+        meal_type=infer_meal_type(now, tz_offset_minutes),
     )
     db.add(log)
     db.commit()
@@ -1098,6 +1150,7 @@ def save_parsed_log(
 def save_manual_log(
     request: Request,
     data: ManualLogInput,
+    tz_offset_minutes: int = Query(0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1105,6 +1158,7 @@ def save_manual_log(
         "items": [{"name": data.name, "calories": data.calories, "protein": data.protein, "carbs": data.carbs, "fat": data.fat}],
         "total": {"calories": data.calories, "protein": data.protein, "carbs": data.carbs, "fat": data.fat},
     }
+    now = datetime.utcnow()
     log = FoodLog(
         user_id=current_user.id,
         input_text=f"✏️ {data.name}",
@@ -1116,6 +1170,7 @@ def save_manual_log(
         fiber=data.fiber,
         sugar=data.sugar,
         sodium=data.sodium,
+        meal_type=infer_meal_type(now, tz_offset_minutes),
     )
     db.add(log)
     db.commit()
@@ -1157,11 +1212,50 @@ def get_logs_today(
             "fiber": log.fiber,
             "sugar": log.sugar,
             "sodium": log.sodium,
+            "meal_type": log.meal_type,
         }
         for log in logs
     ]
 
     return JSONResponse(content={"logs": results})
+
+
+# ============================================================
+# GET /logs/favorites  — frequently logged meals
+# ============================================================
+@app.get("/logs/favorites")
+def get_favorites(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rows = (
+        db.query(
+            FoodLog.input_text,
+            func.count(FoodLog.id).label("cnt"),
+            func.avg(FoodLog.calories).label("avg_cal"),
+            func.avg(FoodLog.protein).label("avg_pro"),
+            func.avg(FoodLog.carbs).label("avg_carb"),
+            func.avg(FoodLog.fat).label("avg_fat"),
+        )
+        .filter(FoodLog.user_id == current_user.id)
+        .group_by(FoodLog.input_text)
+        .having(func.count(FoodLog.id) >= 2)
+        .order_by(func.count(FoodLog.id).desc())
+        .limit(5)
+        .all()
+    )
+    favorites = [
+        {
+            "input_text": r.input_text,
+            "count": r.cnt,
+            "avg_calories": round(r.avg_cal or 0),
+            "avg_protein": round(r.avg_pro or 0),
+            "avg_carbs": round(r.avg_carb or 0),
+            "avg_fat": round(r.avg_fat or 0),
+        }
+        for r in rows
+    ]
+    return {"favorites": favorites}
 
 
 # ============================================================
@@ -1628,6 +1722,7 @@ def generate_workout_plan(
         "full_gym": "a full gym with barbells, dumbbells, cables, and machines",
         "home_gym": "a home gym with dumbbells and/or resistance bands",
         "bodyweight": "bodyweight only — no equipment",
+        "kettlebell": "kettlebells and minimal equipment",
     }.get(profile.gym_access, profile.gym_access or "standard gym equipment")
 
     goal_desc = {
@@ -1652,7 +1747,7 @@ def generate_workout_plan(
         else "No physical limitations."
     )
 
-    prompt = f"""You are an expert personal trainer. Generate a complete 6-week progressive workout plan as valid JSON.
+    prompt = f"""You are an expert personal trainer. Generate a 1-week workout template that will be repeated for 6 weeks. Return valid JSON only.
 
 Athlete profile:
 - Goal: {goal_desc}
@@ -1663,40 +1758,48 @@ Athlete profile:
 - {limitations_line}
 
 Requirements:
-- Exactly {profile.days_per_week} sessions per week for all 6 weeks
+- Exactly {profile.days_per_week} sessions
 - Each session fits within {profile.session_duration_minutes} minutes
-- Progressive overload: intensity and/or volume increases each week
-- Week 1 = Foundation, Week 6 = Peak
-- Each session: 4–6 exercises
+- Each session: 4-6 exercises
+- Include a "progression" field describing how to increase difficulty each week
 
-Return ONLY valid JSON (no markdown, no code fences). Keep exercise notes very brief or omit them to stay within token limits:
+Return ONLY valid JSON (no markdown, no code fences):
 {{
   "name": "Plan name",
   "notes": "1-2 sentence program description",
-  "weeks": [
+  "progression": "How to progress weekly (e.g. add 1 set per exercise each week, increase weight 5%)",
+  "sessions": [
     {{
-      "week_number": 1,
-      "sessions": [
-        {{
-          "day_number": 1,
-          "name": "Session name (e.g. Upper Body A, Push Day, Full Body 1)",
-          "exercises": [
-            {{"name": "Exercise name", "sets": 3, "reps": "8-10", "rest_seconds": 90}}
-          ]
-        }}
+      "day_number": 1,
+      "name": "Session name",
+      "exercises": [
+        {{"name": "Exercise name", "sets": 3, "reps": "8-10", "rest_seconds": 90}}
       ]
     }}
   ]
 }}"""
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=12000,
-        )
-        ai_reply = response.choices[0].message.content
+        ai_reply = None
+        if anthropic_client:
+            try:
+                response = anthropic_client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=4000,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.7,
+                )
+                ai_reply = response.content[0].text
+            except Exception as claude_err:
+                print(f"Claude API failed, falling back to GPT: {claude_err}")
+        if ai_reply is None:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7,
+                max_tokens=4000,
+            )
+            ai_reply = response.choices[0].message.content
         try:
             parsed = extract_json(ai_reply)
         except Exception:
@@ -1708,30 +1811,53 @@ Return ONLY valid JSON (no markdown, no code fences). Keep exercise notes very b
             WorkoutPlan.is_active == 1,
         ).update({"is_active": 0})
 
+        progression = parsed.get("progression", "")
+        notes_parts = [parsed.get("notes", "")]
+        if progression:
+            notes_parts.append(f"Progression: {progression}")
+
         # Create the new plan
         plan = WorkoutPlan(
             user_id=current_user.id,
             name=parsed.get("name", "My 6-Week Plan"),
-            notes=parsed.get("notes"),
+            notes=" | ".join(p for p in notes_parts if p),
             total_weeks=6,
             is_active=1,
         )
         db.add(plan)
         db.flush()  # get plan.id before adding sessions
 
-        # Create all sessions
-        for week_data in parsed.get("weeks", []):
-            week_num = week_data.get("week_number", 1)
-            for session_data in week_data.get("sessions", []):
-                session = PlanSession(
-                    plan_id=plan.id,
-                    week_number=week_num,
-                    day_number=session_data.get("day_number", 1),
-                    name=session_data.get("name", "Workout"),
-                    exercises_json=json.dumps(session_data.get("exercises", [])),
-                    is_completed=0,
-                )
-                db.add(session)
+        # Support both formats: new 1-week template or legacy 6-week full plan
+        weeks_data = parsed.get("weeks", [])
+        template_sessions = parsed.get("sessions", [])
+
+        if template_sessions:
+            # New format: expand 1-week template into 6 weeks
+            for week_num in range(1, 7):
+                for session_data in template_sessions:
+                    session = PlanSession(
+                        plan_id=plan.id,
+                        week_number=week_num,
+                        day_number=session_data.get("day_number", 1),
+                        name=session_data.get("name", "Workout"),
+                        exercises_json=json.dumps(session_data.get("exercises", [])),
+                        is_completed=0,
+                    )
+                    db.add(session)
+        else:
+            # Legacy format: full 6-week plan from AI
+            for week_data in weeks_data:
+                week_num = week_data.get("week_number", 1)
+                for session_data in week_data.get("sessions", []):
+                    session = PlanSession(
+                        plan_id=plan.id,
+                        week_number=week_num,
+                        day_number=session_data.get("day_number", 1),
+                        name=session_data.get("name", "Workout"),
+                        exercises_json=json.dumps(session_data.get("exercises", [])),
+                        is_completed=0,
+                    )
+                    db.add(session)
 
         db.commit()
         db.refresh(plan)

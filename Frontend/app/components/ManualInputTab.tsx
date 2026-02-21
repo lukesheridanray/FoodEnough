@@ -1,8 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
-import { authHeaders } from "../../lib/auth";
-import { API_URL } from "../../lib/config";
+import { apiFetch, UnauthorizedError } from "../../lib/api";
 
 interface ManualInputTabProps {
   onLogged: () => void;
@@ -40,9 +39,10 @@ export default function ManualInputTab({ onLogged, onUnauthorized }: ManualInput
     setManualError("");
     setManualLoading(true);
     try {
-      const res = await fetch(`${API_URL}/logs/manual`, {
+      const tzOffset = -new Date().getTimezoneOffset();
+      const res = await apiFetch(`/logs/manual?tz_offset_minutes=${tzOffset}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: manualName.trim(),
           calories: _cal,
@@ -54,7 +54,6 @@ export default function ManualInputTab({ onLogged, onUnauthorized }: ManualInput
           sodium: _sodium,
         }),
       });
-      if (res.status === 401) { onUnauthorized(); return; }
       if (res.ok) {
         setManualName(""); setManualCalories(""); setManualProtein("");
         setManualCarbs(""); setManualFat(""); setManualFiber("");
@@ -66,7 +65,8 @@ export default function ManualInputTab({ onLogged, onUnauthorized }: ManualInput
         const err = await res.json().catch(() => ({}));
         setManualError(err.detail || "Failed to save. Please try again.");
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { onUnauthorized(); return; }
       setManualError("Connection failed. Please try again.");
     } finally {
       setManualLoading(false);
@@ -134,7 +134,7 @@ export default function ManualInputTab({ onLogged, onUnauthorized }: ManualInput
         className="w-full py-2 bg-gradient-to-r from-green-600 to-green-500 text-white text-sm font-medium rounded-xl shadow-sm disabled:opacity-60 flex items-center justify-center gap-1.5"
       >
         {manualLoading ? (
-          <><Loader2 className="w-4 h-4 animate-spin" />Saving\u2026</>
+          <><Loader2 className="w-4 h-4 animate-spin" />Saving{"\u2026"}</>
         ) : manualSuccess ? "\u2713 Saved!" : "Save Log \u2192"}
       </button>
     </div>

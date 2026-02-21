@@ -11,6 +11,10 @@ interface HealthSurveyProps {
   setHeightFt: (ft: string) => void;
   heightIn: string;
   setHeightIn: (inches: string) => void;
+  heightUnit: "imperial" | "metric";
+  setHeightUnit: (unit: "imperial" | "metric") => void;
+  heightCm: string;
+  setHeightCm: (cm: string) => void;
   surveyWeight: string;
   setSurveyWeight: (w: string) => void;
   weightUnit: 'lbs' | 'kg';
@@ -35,6 +39,10 @@ export default function HealthSurvey({
   setHeightFt,
   heightIn,
   setHeightIn,
+  heightUnit,
+  setHeightUnit,
+  heightCm,
+  setHeightCm,
   surveyWeight,
   setSurveyWeight,
   weightUnit,
@@ -47,6 +55,8 @@ export default function HealthSurvey({
   calcError,
   onCalculateGoals,
 }: HealthSurveyProps) {
+  const heightValid = heightUnit === "metric" ? !!heightCm : !!heightFt;
+
   return (
     <section className="px-5 mt-6">
       <div className="bg-white rounded-2xl shadow-sm p-5">
@@ -101,36 +111,65 @@ export default function HealthSurvey({
                 />
               </div>
               <div className="flex-1">
-                <label className="text-xs font-medium text-gray-500 uppercase tracking-wider">Height</label>
-                <div className="flex gap-2 mt-1.5">
-                  <div className="flex-1 relative">
-                    <input
-                      type="number"
-                      value={heightFt}
-                      onChange={(e) => setHeightFt(e.target.value)}
-                      placeholder="5"
-                      min={3} max={8}
-                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 pr-7 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
-                    />
-                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">ft</span>
-                  </div>
-                  <div className="flex-1 relative">
-                    <input
-                      type="number"
-                      value={heightIn}
-                      onChange={(e) => setHeightIn(e.target.value)}
-                      placeholder="10"
-                      min={0} max={11}
-                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 pr-7 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
-                    />
-                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">in</span>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wider">Height</label>
+                  <div className="flex gap-1">
+                    {(["imperial", "metric"] as const).map((u) => (
+                      <button
+                        key={u}
+                        onClick={() => setHeightUnit(u)}
+                        className={`text-xs px-2 py-0.5 rounded-md transition-all ${
+                          heightUnit === u ? "bg-green-100 text-green-700 font-medium" : "text-gray-400 hover:text-gray-600"
+                        }`}
+                      >
+                        {u === "imperial" ? "ft/in" : "cm"}
+                      </button>
+                    ))}
                   </div>
                 </div>
+                {heightUnit === "imperial" ? (
+                  <div className="flex gap-2 mt-1.5">
+                    <div className="flex-1 relative">
+                      <input
+                        type="number"
+                        value={heightFt}
+                        onChange={(e) => setHeightFt(e.target.value)}
+                        placeholder="5"
+                        min={3} max={8}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 pr-7 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
+                      />
+                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">ft</span>
+                    </div>
+                    <div className="flex-1 relative">
+                      <input
+                        type="number"
+                        value={heightIn}
+                        onChange={(e) => setHeightIn(e.target.value)}
+                        placeholder="10"
+                        min={0} max={11}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2.5 pr-7 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
+                      />
+                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">in</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="relative mt-1.5">
+                    <input
+                      type="number"
+                      value={heightCm}
+                      onChange={(e) => setHeightCm(e.target.value)}
+                      placeholder="e.g. 178"
+                      min={100} max={250}
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 pr-8 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
+                    />
+                    <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400">cm</span>
+                  </div>
+                )}
               </div>
             </div>
             <button
-              onClick={() => { if (age && heightFt) setSurveyStep(2); }}
-              disabled={!age || !heightFt}
+              onClick={() => { if (age && heightValid) setSurveyStep(2); }}
+              disabled={!age || !heightValid}
               className="w-full py-2.5 bg-gradient-to-r from-green-600 to-green-500 text-white text-sm font-semibold rounded-xl shadow-sm disabled:opacity-40"
             >
               Continue {"\u2192"}
@@ -247,7 +286,7 @@ export default function HealthSurvey({
               disabled={calculating}
               className="w-full py-2.5 bg-gradient-to-r from-green-600 to-green-500 text-white text-sm font-semibold rounded-xl shadow-sm disabled:opacity-60 flex items-center justify-center gap-2"
             >
-              {calculating ? <><span className="animate-spin inline-block">{"\u27f3"}</span> Calculating\u2026</> : "Calculate My Goals \u2192"}
+              {calculating ? <><span className="animate-spin inline-block">{"\u27f3"}</span> Calculating{"\u2026"}</> : "Calculate My Goals \u2192"}
             </button>
             <button onClick={() => setSurveyStep(3)} className="mt-2 w-full text-xs text-gray-400 hover:text-gray-600">
               {"\u2190"} Back
