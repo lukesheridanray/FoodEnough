@@ -17,7 +17,8 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
 import bcrypt
-from jose import JWTError, jwt
+import jwt as pyjwt
+from jwt.exceptions import PyJWTError
 from openai import OpenAI
 import os
 import json
@@ -44,9 +45,9 @@ with open("prompt_template.txt", "r", encoding="utf-8") as _f:
     _PROMPT_TEMPLATE = _f.read()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-this-in-production")
-if JWT_SECRET_KEY == "change-this-in-production":
-    print("WARNING: JWT_SECRET_KEY is using the insecure default. Set JWT_SECRET_KEY in .env before deploying.", file=sys.stderr, flush=True)
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
+if not JWT_SECRET_KEY:
+    raise RuntimeError("JWT_SECRET_KEY environment variable is required. Set it in .env before starting the server.")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
@@ -209,8 +210,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
@@ -239,8 +240,8 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def create_access_token(user_id: int) -> str:
-    expire = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=JWT_EXPIRE_MINUTES)
-    return jwt.encode(
+    expire = datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRE_MINUTES)
+    return pyjwt.encode(
         {"sub": str(user_id), "exp": expire},
         JWT_SECRET_KEY,
         algorithm=JWT_ALGORITHM,
@@ -380,11 +381,11 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="Not authenticated")
     token = credentials.credentials
     try:
-        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        payload = pyjwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
         user_id: str = payload.get("sub")
         if user_id is None:
             raise HTTPException(status_code=401, detail="Invalid token")
-    except JWTError:
+    except PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
     try:
@@ -876,6 +877,20 @@ def update_log(
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"}
 MAX_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MB
 
+IMAGE_MAGIC_BYTES = {
+    b"\xff\xd8\xff": "image/jpeg",
+    b"\x89PNG\r\n\x1a\n": "image/png",
+    b"RIFF": "image/webp",
+    b"GIF87a": "image/gif",
+    b"GIF89a": "image/gif",
+}
+
+def _validate_image_magic(contents: bytes) -> str | None:
+    for magic, mime in IMAGE_MAGIC_BYTES.items():
+        if contents[:len(magic)] == magic:
+            return mime
+    return None
+
 IMAGE_PROMPT = """You are a calorie and macronutrient estimating assistant analyzing a photo of food.
 
 Identify all food items visible in the image and estimate their calories and macros. Return a single valid JSON object in this exact format:
@@ -916,8 +931,12 @@ async def save_log_from_image(
     if len(contents) > MAX_IMAGE_BYTES:
         raise HTTPException(status_code=400, detail="Image must be 5 MB or smaller")
 
+    detected_type = _validate_image_magic(contents)
+    if not detected_type:
+        raise HTTPException(status_code=400, detail="File content does not match a valid image format")
+
     b64_image = base64.b64encode(contents).decode("utf-8")
-    media_type = image.content_type or "image/jpeg"
+    media_type = detected_type
 
     try:
         response = client.chat.completions.create(
@@ -993,8 +1012,12 @@ async def parse_log_from_image(
     if len(contents) > MAX_IMAGE_BYTES:
         raise HTTPException(status_code=400, detail="Image must be 5 MB or smaller")
 
+    detected_type = _validate_image_magic(contents)
+    if not detected_type:
+        raise HTTPException(status_code=400, detail="File content does not match a valid image format")
+
     b64_image = base64.b64encode(contents).decode("utf-8")
-    media_type = image.content_type or "image/jpeg"
+    media_type = detected_type
 
     try:
         response = client.chat.completions.create(

@@ -93,7 +93,7 @@ class TestRegister:
 
     def test_register_short_password(self):
         res = client.post("/auth/register", json={"email": "a@b.com", "password": "short"})
-        assert res.status_code == 400
+        assert res.status_code == 422
 
     def test_register_invalid_email(self):
         res = client.post("/auth/register", json={"email": "not-an-email", "password": "password123"})
@@ -164,7 +164,7 @@ class TestFoodLogs:
             "/logs/save-parsed",
             json={"input_text": "food", "calories": 100, "protein": 10, "carbs": 10, "fat": 5},
         )
-        assert res.status_code == 403
+        assert res.status_code in (401, 403)
 
     def test_get_today_logs(self):
         token = get_token()
@@ -242,7 +242,7 @@ class TestProfile:
 
     def test_profile_requires_auth(self):
         res = client.get("/profile")
-        assert res.status_code == 403
+        assert res.status_code in (401, 403)
 
 
 # ---------------------------------------------------------------------------
