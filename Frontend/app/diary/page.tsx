@@ -171,12 +171,12 @@ export default function DiaryPage() {
 
   if (loading) return (
     <div className="min-h-screen bg-gradient-to-b from-green-100 to-green-50 flex items-center justify-center">
-      <p className="text-gray-500">Loading…</p>
+      <p aria-live="polite" className="text-gray-500">Loading…</p>
     </div>
   );
   if (error) return (
     <div className="min-h-screen bg-gradient-to-b from-green-100 to-green-50 flex items-center justify-center">
-      <p className="text-red-500">{error}</p>
+      <p role="alert" className="text-red-500">{error}</p>
     </div>
   );
 
@@ -188,6 +188,7 @@ export default function DiaryPage() {
         {/* Week navigation */}
         <div className="flex items-center justify-between mb-6">
           <button
+            aria-label="Previous week"
             onClick={() => { setWeekOffset(w => w + 1); setLoading(true); }}
             className="p-2 rounded-xl bg-white shadow-sm text-gray-600 hover:bg-gray-50 transition-colors"
           >←</button>
@@ -198,6 +199,7 @@ export default function DiaryPage() {
             <p className="text-sm text-gray-500">{getWeekLabel()}</p>
           </div>
           <button
+            aria-label="Next week"
             onClick={() => { setWeekOffset(w => Math.max(0, w - 1)); setLoading(true); }}
             disabled={weekOffset === 0}
             className="p-2 rounded-xl bg-white shadow-sm text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-30"

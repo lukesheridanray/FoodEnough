@@ -2,7 +2,6 @@
 import { useState } from "react";
 import Link from "next/link";
 import { API_URL } from "../../lib/config";
-import { COMMON_HEADERS } from "../../lib/auth";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -17,7 +16,7 @@ export default function ForgotPasswordPage() {
     try {
       const res = await fetch(`${API_URL}/auth/forgot-password`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...COMMON_HEADERS },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
       if (!res.ok) {
@@ -54,8 +53,9 @@ export default function ForgotPasswordPage() {
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="text-sm text-gray-600 block mb-1">Email address</label>
+              <label htmlFor="forgot-email" className="text-sm text-gray-600 block mb-1">Email address</label>
               <input
+                id="forgot-email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -65,7 +65,7 @@ export default function ForgotPasswordPage() {
                 className="w-full border border-green-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
               />
             </div>
-            {error && <p className="text-red-500 text-sm">{error}</p>}
+            {error && <p role="alert" className="text-red-500 text-sm">{error}</p>}
             <button
               type="submit"
               disabled={loading}

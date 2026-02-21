@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { setToken, COMMON_HEADERS } from "../../lib/auth";
+import { setToken } from "../../lib/auth";
 import { API_URL } from "../../lib/config";
 
 export default function LoginPage() {
@@ -19,7 +19,7 @@ export default function LoginPage() {
     try {
       const res = await fetch(`${API_URL}/auth/login`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...COMMON_HEADERS },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
       const data = await res.json();
@@ -43,8 +43,9 @@ export default function LoginPage() {
         <p className="text-sm text-gray-500 mb-6">Log in to your account</p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="text-sm text-gray-600 block mb-1">Email</label>
+            <label htmlFor="login-email" className="text-sm text-gray-600 block mb-1">Email</label>
             <input
+              id="login-email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -54,8 +55,9 @@ export default function LoginPage() {
             />
           </div>
           <div>
-            <label className="text-sm text-gray-600 block mb-1">Password</label>
+            <label htmlFor="login-password" className="text-sm text-gray-600 block mb-1">Password</label>
             <input
+              id="login-password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -64,7 +66,7 @@ export default function LoginPage() {
               className="w-full border border-green-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
             />
           </div>
-          {error && <p className="text-red-500 text-sm">{error}</p>}
+          {error && <p role="alert" className="text-red-500 text-sm">{error}</p>}
           <button
             type="submit"
             disabled={loading}

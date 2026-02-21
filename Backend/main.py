@@ -9,7 +9,7 @@ from fastapi import FastAPI, Depends, HTTPException, Query, Request, File, Uploa
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy import create_engine, Column, Integer, Float, DateTime, Text, String, ForeignKey, text
+from sqlalchemy import create_engine, Column, Integer, Float, DateTime, Text, String, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from datetime import datetime, timedelta, timezone
@@ -100,9 +100,9 @@ class FoodLog(Base):
     __tablename__ = "food_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     input_text = Column(Text, nullable=False)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
     calories = Column(Float)
     protein = Column(Float)
     carbs = Column(Float)
@@ -118,7 +118,7 @@ class Workout(Base):
     __tablename__ = "workouts"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     name = Column(String, nullable=False)
     exercises_json = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
@@ -130,7 +130,7 @@ class WeightEntry(Base):
     __tablename__ = "weight_entries"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     weight_lbs = Column(Float, nullable=False)
     timestamp = Column(DateTime, default=datetime.utcnow)
     user = relationship("User", back_populates="weight_entries")
@@ -155,7 +155,7 @@ class WorkoutPlan(Base):
     __tablename__ = "workout_plans"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     name = Column(String, nullable=False)
     is_active = Column(Integer, default=1)  # 1 = active, 0 = inactive
     total_weeks = Column(Integer, default=6)
@@ -169,7 +169,7 @@ class PlanSession(Base):
     __tablename__ = "plan_sessions"
 
     id = Column(Integer, primary_key=True, index=True)
-    plan_id = Column(Integer, ForeignKey("workout_plans.id"), nullable=False)
+    plan_id = Column(Integer, ForeignKey("workout_plans.id"), nullable=False, index=True)
     week_number = Column(Integer, nullable=False)
     day_number = Column(Integer, nullable=False)
     name = Column(String, nullable=False)
@@ -190,44 +190,6 @@ class PasswordResetToken(Base):
 
 
 Base.metadata.create_all(bind=engine)
-
-# Migrate new nullable columns onto existing users table (SQLite safe)
-_MIGRATIONS = [
-    "ALTER TABLE users ADD COLUMN calorie_goal INTEGER",
-    "ALTER TABLE users ADD COLUMN protein_goal INTEGER",
-    "ALTER TABLE users ADD COLUMN carbs_goal INTEGER",
-    "ALTER TABLE users ADD COLUMN fat_goal INTEGER",
-]
-with engine.connect() as _conn:
-    for _sql in _MIGRATIONS:
-        try:
-            _conn.execute(text(_sql))
-            _conn.commit()
-        except Exception:
-            pass  # column already exists
-
-
-def _run_migrations():
-    """Add new columns to existing tables without Alembic."""
-    new_cols = [
-        "ALTER TABLE users ADD COLUMN age INTEGER",
-        "ALTER TABLE users ADD COLUMN sex VARCHAR",
-        "ALTER TABLE users ADD COLUMN height_cm FLOAT",
-        "ALTER TABLE users ADD COLUMN activity_level VARCHAR",
-        "ALTER TABLE users ADD COLUMN goal_type VARCHAR",
-        "ALTER TABLE food_logs ADD COLUMN fiber FLOAT",
-        "ALTER TABLE food_logs ADD COLUMN sugar FLOAT",
-        "ALTER TABLE food_logs ADD COLUMN sodium FLOAT",
-    ]
-    with engine.connect() as conn:
-        for sql in new_cols:
-            try:
-                conn.execute(text(sql))
-                conn.commit()
-            except Exception:
-                pass  # column already exists
-
-_run_migrations()
 
 
 # ============================================================
@@ -454,6 +416,15 @@ class RegisterInput(BaseModel):
     email: EmailStr
     password: str
 
+    @field_validator("password")
+    @classmethod
+    def password_valid(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        if len(v.encode("utf-8")) > 72:
+            raise ValueError("Password must be 72 characters or fewer")
+        return v
+
 
 class LoginInput(BaseModel):
     email: EmailStr
@@ -659,10 +630,6 @@ class ManualLogInput(BaseModel):
 @app.post("/auth/register")
 @limiter.limit("5/minute")
 def register(request: Request, data: RegisterInput, db: Session = Depends(get_db)):
-    if len(data.password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
-    if len(data.password.encode("utf-8")) > 72:
-        raise HTTPException(status_code=400, detail="Password must be 72 characters or fewer")
     email = data.email.lower().strip()
     if db.query(User).filter(User.email == email).first():
         raise HTTPException(status_code=400, detail="Email already registered")

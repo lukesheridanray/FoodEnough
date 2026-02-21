@@ -3,7 +3,6 @@ import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { API_URL } from "../../lib/config";
-import { COMMON_HEADERS } from "../../lib/auth";
 
 function ResetPasswordForm() {
   const [password, setPassword] = useState("");
@@ -34,7 +33,7 @@ function ResetPasswordForm() {
     try {
       const res = await fetch(`${API_URL}/auth/reset-password`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...COMMON_HEADERS },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, new_password: password }),
       });
       const data = await res.json().catch(() => ({}));
@@ -66,8 +65,9 @@ function ResetPasswordForm() {
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="text-sm text-gray-600 block mb-1">New password</label>
+              <label htmlFor="reset-password" className="text-sm text-gray-600 block mb-1">New password</label>
               <input
+                id="reset-password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -78,8 +78,9 @@ function ResetPasswordForm() {
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600 block mb-1">Confirm password</label>
+              <label htmlFor="reset-confirm" className="text-sm text-gray-600 block mb-1">Confirm password</label>
               <input
+                id="reset-confirm"
                 type="password"
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
@@ -89,7 +90,7 @@ function ResetPasswordForm() {
                 className="w-full border border-green-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
               />
             </div>
-            {error && <p className="text-red-500 text-sm">{error}</p>}
+            {error && <p role="alert" className="text-red-500 text-sm">{error}</p>}
             <button
               type="submit"
               disabled={loading || !token}

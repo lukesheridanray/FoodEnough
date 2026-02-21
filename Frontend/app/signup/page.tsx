@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { setToken, COMMON_HEADERS } from "../../lib/auth";
+import { setToken } from "../../lib/auth";
 import { API_URL } from "../../lib/config";
 
 export default function SignupPage() {
@@ -28,7 +28,7 @@ export default function SignupPage() {
     try {
       const res = await fetch(`${API_URL}/auth/register`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...COMMON_HEADERS },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
       const data = await res.json();
@@ -52,8 +52,9 @@ export default function SignupPage() {
         <p className="text-sm text-gray-500 mb-6">Create your account</p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="text-sm text-gray-600 block mb-1">Email</label>
+            <label htmlFor="signup-email" className="text-sm text-gray-600 block mb-1">Email</label>
             <input
+              id="signup-email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -63,8 +64,9 @@ export default function SignupPage() {
             />
           </div>
           <div>
-            <label className="text-sm text-gray-600 block mb-1">Password</label>
+            <label htmlFor="signup-password" className="text-sm text-gray-600 block mb-1">Password</label>
             <input
+              id="signup-password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -74,8 +76,9 @@ export default function SignupPage() {
             />
           </div>
           <div>
-            <label className="text-sm text-gray-600 block mb-1">Confirm Password</label>
+            <label htmlFor="signup-confirm" className="text-sm text-gray-600 block mb-1">Confirm Password</label>
             <input
+              id="signup-confirm"
               type="password"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
@@ -84,7 +87,7 @@ export default function SignupPage() {
               className="w-full border border-green-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
             />
           </div>
-          {error && <p className="text-red-500 text-sm">{error}</p>}
+          {error && <p role="alert" className="text-red-500 text-sm">{error}</p>}
           <button
             type="submit"
             disabled={loading}

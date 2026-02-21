@@ -15,7 +15,7 @@ export default function BottomNav() {
   ];
 
   return (
-    <nav className="fixed bottom-0 inset-x-0 bg-white/90 backdrop-blur-md border-t border-gray-100 flex justify-around items-center py-2 shadow-lg"
+    <nav role="navigation" aria-label="Main navigation" className="fixed bottom-0 inset-x-0 bg-white/90 backdrop-blur-md border-t border-gray-100 flex justify-around items-center py-2 shadow-lg"
       style={{ paddingBottom: 'max(8px, env(safe-area-inset-bottom))' }}>
       {tabs.map((tab) => {
         const active = pathname === tab.href;
@@ -24,6 +24,8 @@ export default function BottomNav() {
           <button
             key={tab.id}
             onClick={() => router.push(tab.href)}
+            aria-label={tab.label}
+            aria-current={active ? "page" : undefined}
             className="flex flex-col items-center gap-0.5 px-4 py-1 transition-all"
           >
             <div className={`p-1.5 rounded-xl transition-all ${active ? "bg-green-100" : ""}`}>

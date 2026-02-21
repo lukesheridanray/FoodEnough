@@ -130,11 +130,18 @@ export default function BarcodeScanner({ onDetected, onClose }: Props) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 flex flex-col items-center justify-center">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Barcode scanner"
+      onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
+      className="fixed inset-0 z-50 bg-black/80 flex flex-col items-center justify-center"
+    >
       <div className="relative w-full max-w-sm mx-4">
         {/* Close button */}
         <button
           onClick={onClose}
+          aria-label="Close barcode scanner"
           className="absolute -top-10 right-0 text-white/80 hover:text-white z-10"
           title="Cancel"
         >
