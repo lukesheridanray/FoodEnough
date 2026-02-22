@@ -765,13 +765,16 @@ def delete_account(
     user_id = current_user.id
     email = current_user.email
 
-    db.query(FoodLog).filter(FoodLog.user_id == user_id).delete()
-    db.query(Workout).filter(Workout.user_id == user_id).delete()
-    db.query(WeightEntry).filter(WeightEntry.user_id == user_id).delete()
-    db.query(FitnessProfile).filter(FitnessProfile.user_id == user_id).delete()
-    # WorkoutPlan has cascade="all, delete-orphan" on sessions, so deleting plans removes sessions
-    db.query(WorkoutPlan).filter(WorkoutPlan.user_id == user_id).delete()
-    db.query(PasswordResetToken).filter(PasswordResetToken.email == email).delete()
+    # Delete PlanSessions first (FK to workout_plans)
+    plan_ids = [p.id for p in db.query(WorkoutPlan.id).filter(WorkoutPlan.user_id == user_id).all()]
+    if plan_ids:
+        db.query(PlanSession).filter(PlanSession.plan_id.in_(plan_ids)).delete(synchronize_session=False)
+    db.query(WorkoutPlan).filter(WorkoutPlan.user_id == user_id).delete(synchronize_session=False)
+    db.query(FoodLog).filter(FoodLog.user_id == user_id).delete(synchronize_session=False)
+    db.query(Workout).filter(Workout.user_id == user_id).delete(synchronize_session=False)
+    db.query(WeightEntry).filter(WeightEntry.user_id == user_id).delete(synchronize_session=False)
+    db.query(FitnessProfile).filter(FitnessProfile.user_id == user_id).delete(synchronize_session=False)
+    db.query(PasswordResetToken).filter(PasswordResetToken.email == email).delete(synchronize_session=False)
     db.delete(current_user)
     db.commit()
     return {"status": "deleted"}
