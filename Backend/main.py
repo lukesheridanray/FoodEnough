@@ -93,6 +93,8 @@ class User(Base):
     height_cm = Column(Float, nullable=True)
     activity_level = Column(String, nullable=True)  # 'sedentary','light','moderate','active','very_active'
     goal_type = Column(String, nullable=True)        # 'lose', 'maintain', 'gain'
+    is_verified = Column(Integer, default=0)           # 0 = unverified, 1 = verified
+    verification_token = Column(String, nullable=True)
     logs = relationship("FoodLog", back_populates="user")
     workouts = relationship("Workout", back_populates="user")
     weight_entries = relationship("WeightEntry", back_populates="user")
@@ -253,10 +255,10 @@ def create_access_token(user_id: int) -> str:
     )
 
 
-def send_password_reset_email(to_email: str, reset_url: str) -> bool:
-    """Send a password reset email via SMTP. Returns True if sent, False if SMTP is not configured."""
+def _send_email(to_email: str, subject: str, text_body: str, html_body: str) -> bool:
+    """Send an email via SMTP. Returns True if sent, False if SMTP is not configured."""
     smtp_host = os.getenv("SMTP_HOST")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_port = int(os.getenv("SMTP_PORT", "465"))
     smtp_user = os.getenv("SMTP_USER")
     smtp_password = os.getenv("SMTP_PASSWORD")
     smtp_from = os.getenv("SMTP_FROM") or smtp_user
@@ -265,37 +267,75 @@ def send_password_reset_email(to_email: str, reset_url: str) -> bool:
         return False
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = "Reset your FoodEnough password"
+    msg["Subject"] = subject
     msg["From"] = smtp_from
     msg["To"] = to_email
-
-    text_body = (
-        f"Click the link below to reset your FoodEnough password:\n\n"
-        f"{reset_url}\n\n"
-        f"This link expires in 1 hour. If you didn't request this, you can safely ignore this email."
-    )
-    html_body = f"""<html><body style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">
-<h2 style="color:#15803d">🌿 FoodEnough</h2>
-<p>Click the button below to reset your password:</p>
-<p><a href="{reset_url}" style="display:inline-block;padding:12px 24px;background:#16a34a;color:#fff;text-decoration:none;border-radius:8px;font-weight:600">Reset Password</a></p>
-<p style="color:#6b7280;font-size:13px">Or copy this link:<br><a href="{reset_url}" style="color:#16a34a">{reset_url}</a></p>
-<p style="color:#6b7280;font-size:13px">This link expires in 1 hour. If you didn't request a password reset, you can safely ignore this email.</p>
-</body></html>"""
-
     msg.attach(MIMEText(text_body, "plain"))
     msg.attach(MIMEText(html_body, "html"))
 
     try:
         context = ssl.create_default_context()
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
-            server.ehlo()
-            server.starttls(context=context)
-            server.login(smtp_user, smtp_password)
-            server.sendmail(smtp_from, to_email, msg.as_string())
+        port = int(os.getenv("SMTP_PORT", "465"))
+        if port == 465:
+            with smtplib.SMTP_SSL(smtp_host, port, context=context) as server:
+                server.login(smtp_user, smtp_password)
+                server.sendmail(smtp_from, to_email, msg.as_string())
+        else:
+            with smtplib.SMTP(smtp_host, port) as server:
+                server.ehlo()
+                server.starttls(context=context)
+                server.login(smtp_user, smtp_password)
+                server.sendmail(smtp_from, to_email, msg.as_string())
         return True
     except Exception as e:
-        print(f"[EMAIL] Failed to send reset email to {to_email}: {e}", file=sys.stderr, flush=True)
+        print(f"[EMAIL] Failed to send email to {to_email}: {e}", file=sys.stderr, flush=True)
         return False
+
+
+def send_password_reset_email(to_email: str, reset_url: str) -> bool:
+    return _send_email(
+        to_email,
+        "Reset your FoodEnough password",
+        f"Click the link below to reset your FoodEnough password:\n\n{reset_url}\n\nThis link expires in 1 hour. If you didn't request this, you can safely ignore this email.",
+        f"""<html><body style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">
+<h2 style="color:#15803d">\U0001f33f FoodEnough</h2>
+<p>Click the button below to reset your password:</p>
+<p><a href="{reset_url}" style="display:inline-block;padding:12px 24px;background:#16a34a;color:#fff;text-decoration:none;border-radius:8px;font-weight:600">Reset Password</a></p>
+<p style="color:#6b7280;font-size:13px">Or copy this link:<br><a href="{reset_url}" style="color:#16a34a">{reset_url}</a></p>
+<p style="color:#6b7280;font-size:13px">This link expires in 1 hour.</p>
+</body></html>""",
+    )
+
+
+def send_verification_email(to_email: str, verify_url: str) -> bool:
+    return _send_email(
+        to_email,
+        "Verify your FoodEnough email",
+        f"Welcome to FoodEnough! Please verify your email by clicking the link below:\n\n{verify_url}\n\nThis link expires in 24 hours.",
+        f"""<html><body style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">
+<h2 style="color:#15803d">\U0001f33f FoodEnough</h2>
+<p>Welcome! Please verify your email to get started:</p>
+<p><a href="{verify_url}" style="display:inline-block;padding:12px 24px;background:#16a34a;color:#fff;text-decoration:none;border-radius:8px;font-weight:600">Verify Email</a></p>
+<p style="color:#6b7280;font-size:13px">Or copy this link:<br><a href="{verify_url}" style="color:#16a34a">{verify_url}</a></p>
+<p style="color:#6b7280;font-size:13px">This link expires in 24 hours.</p>
+</body></html>""",
+    )
+
+
+def send_admin_signup_notification(user_email: str) -> bool:
+    admin_email = os.getenv("ADMIN_EMAIL")
+    if not admin_email:
+        return False
+    return _send_email(
+        admin_email,
+        f"New FoodEnough signup: {user_email}",
+        f"New user registered: {user_email}\nTime: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",
+        f"""<html><body style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">
+<h2 style="color:#15803d">\U0001f33f FoodEnough</h2>
+<p><strong>New user signup:</strong> {user_email}</p>
+<p style="color:#6b7280;font-size:13px">{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</p>
+</body></html>""",
+    )
 
 
 # ============================================================
@@ -660,13 +700,28 @@ def register(request: Request, data: RegisterInput, db: Session = Depends(get_db
     email = data.email.lower().strip()
     if db.query(User).filter(User.email == email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
+
+    verify_token = _secrets.token_urlsafe(32)
     user = User(
         email=email,
         hashed_password=hash_password(data.password),
+        is_verified=0,
+        verification_token=verify_token,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    # Send verification email (non-blocking — don't fail signup if email fails)
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    verify_url = f"{frontend_url}/verify-email?token={verify_token}"
+    sent = send_verification_email(email, verify_url)
+    if not sent:
+        print(f"\n[DEV] Verification URL for {email}:\n{verify_url}\n", flush=True)
+
+    # Notify admin of new signup
+    send_admin_signup_notification(email)
+
     token = create_access_token(user.id)
     return {"access_token": token, "token_type": "bearer"}
 
@@ -679,7 +734,37 @@ def login(request: Request, data: LoginInput, db: Session = Depends(get_db)):
     if not user or not verify_password(data.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     token = create_access_token(user.id)
-    return {"access_token": token, "token_type": "bearer"}
+    return {"access_token": token, "token_type": "bearer", "is_verified": bool(user.is_verified)}
+
+
+@app.get("/auth/verify-email")
+@limiter.limit("10/minute")
+def verify_email(request: Request, token: str = Query(...), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.verification_token == token).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification link.")
+    if user.is_verified:
+        return {"message": "Email already verified."}
+    user.is_verified = 1
+    user.verification_token = None
+    db.commit()
+    return {"message": "Email verified successfully!"}
+
+
+@app.post("/auth/resend-verification")
+@limiter.limit("3/minute")
+def resend_verification(request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if current_user.is_verified:
+        return {"message": "Email already verified."}
+    new_token = _secrets.token_urlsafe(32)
+    current_user.verification_token = new_token
+    db.commit()
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    verify_url = f"{frontend_url}/verify-email?token={new_token}"
+    sent = send_verification_email(current_user.email, verify_url)
+    if not sent:
+        print(f"\n[DEV] Verification URL for {current_user.email}:\n{verify_url}\n", flush=True)
+    return {"message": "Verification email sent."}
 
 
 # ============================================================
@@ -1364,6 +1449,7 @@ def get_profile(
         "height_cm": current_user.height_cm,
         "activity_level": current_user.activity_level,
         "goal_type": current_user.goal_type,
+        "is_verified": bool(current_user.is_verified),
     }
 
 
