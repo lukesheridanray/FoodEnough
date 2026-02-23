@@ -1,5 +1,6 @@
 "use client";
-import { Pencil, Loader2 } from "lucide-react";
+import { useState } from "react";
+import { Pencil, Loader2, ChevronDown, ChevronUp } from "lucide-react";
 import { Log } from "../hooks/useFoodLogs";
 import { formatTime } from "../../lib/auth";
 
@@ -68,6 +69,9 @@ function LogCard({
   onEditSave: (logId: number) => void;
   onDelete: (logId: number) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasItems = (log.items?.length ?? 0) > 1;
+
   return (
     <div className="bg-white rounded-2xl p-4 shadow-sm">
       {editingId === log.id ? (
@@ -99,7 +103,18 @@ function LogCard({
         <>
           <div className="flex justify-between items-start">
             <div className="flex-1 min-w-0 mr-3">
-              <div className="font-semibold text-gray-800 text-sm leading-snug">{log.input_text}</div>
+              <div className="flex items-center gap-1.5">
+                <span className="font-semibold text-gray-800 text-sm leading-snug">{log.input_text}</span>
+                {hasItems && (
+                  <button
+                    onClick={() => setExpanded(!expanded)}
+                    className="text-gray-400 hover:text-green-600 transition-colors flex-shrink-0"
+                    aria-label={expanded ? "Collapse items" : "Expand items"}
+                  >
+                    {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </button>
+                )}
+              </div>
               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                 <span className="text-base font-bold text-green-700">{log.calories} kcal</span>
                 <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded-md font-medium">{log.protein}g P</span>
@@ -144,6 +159,26 @@ function LogCard({
               </div>
             )}
           </div>
+
+          {/* Expanded item breakdown */}
+          {expanded && hasItems && (
+            <div className="mt-3 pt-3 border-t border-gray-100">
+              <ul className="space-y-1.5 pl-1">
+                {log.items!.map((item, i) => (
+                  <li key={i} className="flex justify-between items-center text-xs">
+                    <span className="text-gray-600 capitalize">{item.name}</span>
+                    <span className="flex items-center gap-1.5 flex-shrink-0 ml-2">
+                      <span className="font-semibold text-green-700">{item.calories} kcal</span>
+                      <span className="text-blue-500">{item.protein}g P</span>
+                      <span className="text-amber-500">{item.carbs}g C</span>
+                      <span className="text-orange-500">{item.fat}g F</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {deleteConfirmId === log.id && (
             <div className="mt-2 pt-2 border-t border-gray-100 flex items-center justify-between">
               <p className="text-sm text-gray-500">Remove this entry?</p>

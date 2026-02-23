@@ -1370,6 +1370,7 @@ def get_logs_today(
             "sugar": log.sugar,
             "sodium": log.sodium,
             "meal_type": log.meal_type,
+            "parsed_json": log.parsed_json,
         }
         for log in logs
     ]

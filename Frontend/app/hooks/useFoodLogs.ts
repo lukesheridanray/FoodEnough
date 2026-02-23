@@ -38,6 +38,14 @@ interface BarcodeResult {
   total: { calories: number; protein: number; carbs: number; fat: number; fiber?: number | null; sugar?: number | null; sodium?: number | null };
 }
 
+interface LogItem {
+  name: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}
+
 interface Log {
   id: number;
   input_text: string;
@@ -50,6 +58,8 @@ interface Log {
   sugar?: number | null;
   sodium?: number | null;
   meal_type?: string | null;
+  parsed_json?: string | null;
+  items?: LogItem[];
 }
 
 interface Favorite {
@@ -86,7 +96,18 @@ export function useFoodLogs() {
       const tzOffset = getTzOffsetMinutes();
       const res = await apiFetch(`/logs/today?tz_offset_minutes=${tzOffset}`);
       const data = await res.json().catch(() => ({ logs: [] }));
-      setLogs(data.logs || []);
+      const logsWithItems = (data.logs || []).map((log: Log) => {
+        if (log.parsed_json) {
+          try {
+            const parsed = typeof log.parsed_json === "string" ? JSON.parse(log.parsed_json) : log.parsed_json;
+            log.items = parsed?.items ?? [];
+          } catch {
+            log.items = [];
+          }
+        }
+        return log;
+      });
+      setLogs(logsWithItems);
     } catch (err) {
       if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
       console.error("Error loading logs:", err);
