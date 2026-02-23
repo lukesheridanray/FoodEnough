@@ -75,11 +75,23 @@ export function getTzOffsetMinutes(): number {
   }
 }
 
+/**
+ * Parse a timestamp from the backend as UTC.
+ * Backend returns naive UTC datetimes without "Z" suffix,
+ * so JS would treat them as local time. This ensures UTC.
+ */
+function parseUtc(timestamp: string): Date {
+  if (!timestamp.endsWith("Z") && !timestamp.includes("+") && !/\d{2}-\d{2}:\d{2}$/.test(timestamp)) {
+    return new Date(timestamp + "Z");
+  }
+  return new Date(timestamp);
+}
+
 /** Format a UTC timestamp string in the user's preferred timezone */
 export function formatTime(timestamp: string): string {
   const tz = getTimezone();
   try {
-    return new Date(timestamp).toLocaleTimeString([], {
+    return parseUtc(timestamp).toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
       timeZone: tz,
@@ -97,7 +109,7 @@ export function formatDate(timestamp: string, options?: Intl.DateTimeFormatOptio
   const tz = getTimezone();
   const defaults: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric" };
   try {
-    return new Date(timestamp).toLocaleDateString("en-US", { ...defaults, ...options, timeZone: tz });
+    return parseUtc(timestamp).toLocaleDateString("en-US", { ...defaults, ...options, timeZone: tz });
   } catch {
     return new Date(timestamp).toLocaleDateString("en-US", { ...defaults, ...options });
   }

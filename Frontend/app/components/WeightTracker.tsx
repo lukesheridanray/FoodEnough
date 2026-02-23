@@ -9,6 +9,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import { WeightEntry } from "../hooks/useProfile";
+import { formatDate } from "../../lib/auth";
 
 interface WeightTrackerProps {
   weightInput: string;
@@ -109,7 +110,7 @@ export default function WeightTracker({
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis
                     dataKey="timestamp"
-                    tickFormatter={(t) => new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                    tickFormatter={(t) => formatDate(t, { weekday: undefined, month: "short", day: "numeric" })}
                     tick={{ fontSize: 11 }}
                   />
                   <YAxis
@@ -119,7 +120,7 @@ export default function WeightTracker({
                   />
                   <Tooltip
                     formatter={(v: any) => [`${displayWeight(v as number)} ${unitLabel}`, 'Weight']}
-                    labelFormatter={(t) => new Date(t).toLocaleDateString()}
+                    labelFormatter={(t) => formatDate(t)}
                   />
                   <Line
                     type="monotone"
@@ -141,7 +142,7 @@ export default function WeightTracker({
               {[...weightHistory].reverse().slice(0, 10).map((e) => (
                 <li key={e.id} className="flex justify-between text-sm">
                   <span className="text-gray-500">
-                    {new Date(e.timestamp).toLocaleDateString()}
+                    {formatDate(e.timestamp)}
                   </span>
                   <span className="font-semibold text-green-700">{displayWeight(e.weight_lbs)} {unitLabel}</span>
                 </li>
