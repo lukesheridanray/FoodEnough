@@ -46,6 +46,7 @@ export default function FoodEnoughApp() {
   const [barcodeError, setBarcodeError] = useState("");
   const [savingBarcode, setSavingBarcode] = useState(false);
   const [saveBarcodeError, setSaveBarcodeError] = useState("");
+  const [barcodeSaveSuccess, setBarcodeSaveSuccess] = useState(false);
   const [lookingUpBarcode, setLookingUpBarcode] = useState(false);
 
   const clearBarcode = () => {
@@ -128,7 +129,11 @@ export default function FoodEnoughApp() {
         }),
       });
       if (res.ok) {
-        clearBarcode();
+        setBarcodeSaveSuccess(true);
+        setTimeout(() => {
+          setBarcodeSaveSuccess(false);
+          clearBarcode();
+        }, 1500);
         loadLogs();
         loadSummary();
         loadFavorites();
@@ -158,7 +163,7 @@ export default function FoodEnoughApp() {
       <header className="flex items-center justify-between px-5 py-3">
         <span className="text-green-800 font-medium text-lg">{"\ud83c\udf3f"} FoodEnough</span>
         <div className="flex items-center gap-3">
-          <button onClick={handleLogout} title="Log out">
+          <button onClick={handleLogout} title="Log out" className="p-2">
             <LogOut className="w-5 h-5 text-green-700" />
           </button>
         </div>
@@ -248,7 +253,7 @@ export default function FoodEnoughApp() {
             {barcodeError && !lookingUpBarcode && (
               <div className="bg-white rounded-2xl p-3 shadow-sm flex items-center justify-between">
                 <p className="text-red-500 text-sm">{barcodeError}</p>
-                <button onClick={clearBarcode} className="text-gray-300 hover:text-gray-500 ml-3">
+                <button onClick={clearBarcode} className="text-gray-300 hover:text-gray-500 ml-3 p-2">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -262,7 +267,7 @@ export default function FoodEnoughApp() {
                   <button
                     onClick={clearBarcode}
                     disabled={savingBarcode}
-                    className="text-gray-300 hover:text-gray-500 flex-shrink-0"
+                    className="text-gray-300 hover:text-gray-500 flex-shrink-0 p-2"
                     title="Dismiss"
                   >
                     <X className="w-4 h-4" />
@@ -302,10 +307,16 @@ export default function FoodEnoughApp() {
                 {saveBarcodeError && <p className="text-red-500 text-xs">{saveBarcodeError}</p>}
                 <button
                   onClick={handleBarcodeSave}
-                  disabled={savingBarcode}
-                  className="w-full py-2 bg-gradient-to-r from-green-600 to-green-500 text-white text-sm font-medium rounded-xl shadow-sm disabled:opacity-60 flex items-center justify-center gap-1.5"
+                  disabled={savingBarcode || barcodeSaveSuccess}
+                  className={`w-full py-2 text-sm font-medium rounded-xl shadow-sm flex items-center justify-center gap-1.5 ${
+                    barcodeSaveSuccess
+                      ? "bg-green-100 text-green-700"
+                      : "bg-gradient-to-r from-green-600 to-green-500 text-white disabled:opacity-60"
+                  }`}
                 >
-                  {savingBarcode ? (
+                  {barcodeSaveSuccess ? (
+                    "\u2713 Logged!"
+                  ) : savingBarcode ? (
                     <><Loader2 className="w-4 h-4 animate-spin" />Saving{"\u2026"}</>
                   ) : (
                     "Save Log \u2192"

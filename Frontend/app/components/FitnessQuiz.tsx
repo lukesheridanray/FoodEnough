@@ -87,7 +87,7 @@ export default function FitnessQuiz({
       <div style={{ height: 'max(24px, env(safe-area-inset-top))' }} />
       <header className="px-5 py-3">
         <h1 className="text-xl font-bold text-green-900">Let's build your plan</h1>
-        <p className="text-sm text-gray-500">Answer a few questions to personalize your 6-week program</p>
+        <p className="text-sm text-gray-500">Answer a few questions to personalize your AI-generated 6-week program</p>
       </header>
 
       {/* Progress bar */}

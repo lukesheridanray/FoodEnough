@@ -108,7 +108,7 @@ function LogCard({
                 {hasItems && (
                   <button
                     onClick={() => setExpanded(!expanded)}
-                    className="text-gray-400 hover:text-green-600 transition-colors flex-shrink-0"
+                    className="text-gray-400 hover:text-green-600 transition-colors flex-shrink-0 p-1.5"
                     aria-label={expanded ? "Collapse items" : "Expand items"}
                   >
                     {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -142,7 +142,7 @@ function LogCard({
               <div className="flex items-center gap-1 flex-shrink-0">
                 <button
                   onClick={() => { setEditingId(log.id); setEditText(log.input_text); setDeleteConfirmId(null); }}
-                  className="text-gray-400 hover:text-gray-600 transition-colors p-1"
+                  className="text-gray-400 hover:text-gray-600 transition-colors p-2"
                   title="Edit"
                   aria-label="Edit log"
                 >
@@ -150,7 +150,7 @@ function LogCard({
                 </button>
                 <button
                   onClick={() => setDeleteConfirmId(log.id)}
-                  className="text-red-400 hover:text-red-600 text-xl transition-colors p-1"
+                  className="text-red-400 hover:text-red-600 text-xl transition-colors p-2"
                   title="Delete"
                   aria-label="Delete log"
                 >

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { Loader2 } from "lucide-react";
 import { getToken, safeSetItem } from "../../lib/auth";
 import { apiFetch, UnauthorizedError } from "../../lib/api";
 import HealthSurvey from "../components/HealthSurvey";
@@ -310,8 +311,8 @@ export default function OnboardingPage() {
               Would you like a personalized workout plan?
             </h2>
             <p className="text-sm text-gray-500 mb-6">
-              Answer a few questions and we'll build a custom 6-week program
-              tailored to your goals.
+              Answer a few questions and AI will generate a custom 6-week program
+              tailored to your goals. AI-generated plans are a starting point — adjust based on how you feel.
             </p>
             <button
               onClick={() => setStep("fitness")}
@@ -365,21 +366,19 @@ export default function OnboardingPage() {
                 <p className="text-sm text-gray-500">
                   Redirecting you to the app...
                 </p>
+                <p className="text-xs text-gray-400 italic mt-2">
+                  This is an AI-generated plan. Listen to your body and adjust as needed.
+                </p>
               </>
             ) : (
               <>
-                <div className="text-4xl mb-3 animate-bounce">🏋️</div>
+                <Loader2 className="w-10 h-10 text-green-500 animate-spin mx-auto mb-3" />
                 <h2 className="text-lg font-bold text-green-900 mb-2">
                   Building your plan...
                 </h2>
                 <p className="text-sm text-gray-500">
-                  This may take a moment. We're crafting a program just for you.
+                  AI is building a personalized program based on your answers.
                 </p>
-                <div className="mt-4 flex justify-center">
-                  <div className="h-1.5 w-32 bg-green-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-green-500 rounded-full animate-pulse w-full" />
-                  </div>
-                </div>
               </>
             )}
           </div>

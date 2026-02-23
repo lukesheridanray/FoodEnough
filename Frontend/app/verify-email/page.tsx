@@ -2,6 +2,7 @@
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { Loader2 } from "lucide-react";
 import { API_URL } from "../../lib/config";
 
 function VerifyEmailContent() {
@@ -45,7 +46,7 @@ function VerifyEmailContent() {
       <div className="bg-white rounded-2xl shadow-md p-8 w-full max-w-sm text-center">
         {status === "loading" && (
           <>
-            <div className="text-4xl mb-3 animate-pulse">{"\U0001F33F"}</div>
+            <Loader2 className="w-10 h-10 text-green-500 animate-spin mx-auto mb-3" />
             <h1 className="text-xl font-bold text-green-900 mb-2">Verifying your email...</h1>
           </>
         )}
@@ -99,7 +100,7 @@ export default function VerifyEmailPage() {
       fallback={
         <div className="min-h-screen bg-gradient-to-b from-green-100 to-green-50 flex items-center justify-center px-5">
           <div className="bg-white rounded-2xl shadow-md p-8 w-full max-w-sm text-center">
-            <div className="text-4xl mb-3 animate-pulse">{"\U0001F33F"}</div>
+            <Loader2 className="w-10 h-10 text-green-500 animate-spin mx-auto mb-3" />
             <h1 className="text-xl font-bold text-green-900 mb-2">Verifying your email...</h1>
           </div>
         </div>

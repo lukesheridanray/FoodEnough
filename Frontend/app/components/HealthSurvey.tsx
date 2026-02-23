@@ -1,4 +1,5 @@
 "use client";
+import { Loader2 } from "lucide-react";
 
 interface HealthSurveyProps {
   surveyStep: number;
@@ -118,7 +119,7 @@ export default function HealthSurvey({
                       <button
                         key={u}
                         onClick={() => setHeightUnit(u)}
-                        className={`text-xs px-2 py-0.5 rounded-md transition-all ${
+                        className={`text-xs px-3 py-1.5 rounded-md transition-all ${
                           heightUnit === u ? "bg-green-100 text-green-700 font-medium" : "text-gray-400 hover:text-gray-600"
                         }`}
                       >
@@ -286,7 +287,7 @@ export default function HealthSurvey({
               disabled={calculating}
               className="w-full py-2.5 bg-gradient-to-r from-green-600 to-green-500 text-white text-sm font-semibold rounded-xl shadow-sm disabled:opacity-60 flex items-center justify-center gap-2"
             >
-              {calculating ? <><span className="animate-spin inline-block">{"\u27f3"}</span> Calculating{"\u2026"}</> : "Calculate My Goals \u2192"}
+              {calculating ? <><Loader2 className="w-4 h-4 animate-spin" /> Calculating{"\u2026"}</> : "Calculate My Goals \u2192"}
             </button>
             <button onClick={() => setSurveyStep(3)} className="mt-2 w-full text-xs text-gray-400 hover:text-gray-600">
               {"\u2190"} Back

@@ -28,7 +28,7 @@ export default function BottomNav() {
             aria-current={active ? "page" : undefined}
             className="flex flex-col items-center gap-0.5 px-4 py-1 transition-all"
           >
-            <div className={`p-1.5 rounded-xl transition-all ${active ? "bg-green-100" : ""}`}>
+            <div className={`p-2 rounded-xl transition-all ${active ? "bg-green-100" : ""}`}>
               <Icon className={`w-5 h-5 transition-colors ${active ? "text-green-700" : "text-gray-400"}`} />
             </div>
             <span className={`text-xs font-medium transition-colors ${active ? "text-green-700" : "text-gray-400"}`}>

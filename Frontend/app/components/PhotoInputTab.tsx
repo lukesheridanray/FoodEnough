@@ -18,6 +18,7 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
   const [imageAnalysis, setImageAnalysis] = useState<ImageAnalysis | null>(null);
   const [savingImage, setSavingImage] = useState(false);
   const [saveImageError, setSaveImageError] = useState("");
+  const [saveSuccess, setSaveSuccess] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const clearImage = () => {
@@ -96,7 +97,11 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
         }),
       });
       if (res.ok) {
-        clearImage();
+        setSaveSuccess(true);
+        setTimeout(() => {
+          setSaveSuccess(false);
+          clearImage();
+        }, 1500);
         onLogged();
       } else {
         const err = await res.json().catch(() => ({}));
@@ -151,7 +156,7 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
             <button
               onClick={clearImage}
               disabled={savingImage}
-              className="text-gray-300 hover:text-gray-500 flex-shrink-0"
+              className="text-gray-300 hover:text-gray-500 flex-shrink-0 p-2"
               title="Remove"
             >
               <X className="w-4 h-4" />
@@ -201,14 +206,26 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
               </table>
             </div>
           )}
+          {imageAnalysis && imageAnalysis.items.length > 0 && (
+            <p className="text-xs text-gray-400 italic flex items-center gap-1">
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+              Nutrition estimated by AI from your photo — values are approximate
+            </p>
+          )}
           {saveImageError && <p className="text-red-500 text-xs">{saveImageError}</p>}
           {imageAnalysis && (
             <button
               onClick={handleImageSave}
-              disabled={savingImage}
-              className="w-full py-2 bg-gradient-to-r from-green-600 to-green-500 text-white text-sm font-medium rounded-xl shadow-sm disabled:opacity-60 flex items-center justify-center gap-1.5"
+              disabled={savingImage || saveSuccess}
+              className={`w-full py-2 text-sm font-medium rounded-xl shadow-sm flex items-center justify-center gap-1.5 ${
+                saveSuccess
+                  ? "bg-green-100 text-green-700"
+                  : "bg-gradient-to-r from-green-600 to-green-500 text-white disabled:opacity-60"
+              }`}
             >
-              {savingImage ? (
+              {saveSuccess ? (
+                "\u2713 Logged!"
+              ) : savingImage ? (
                 <><Loader2 className="w-4 h-4 animate-spin" />Saving{"\u2026"}</>
               ) : (
                 "Save Log \u2192"

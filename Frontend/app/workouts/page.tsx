@@ -76,8 +76,11 @@ export default function WorkoutsPage() {
         <section className="px-5 mt-6 text-center">
           <div className="text-6xl mb-3">{"\ud83c\udfcb\ufe0f"}</div>
           <h2 className="text-xl font-bold text-green-900 mb-2">Ready to train?</h2>
-          <p className="text-sm text-gray-500 mb-5 max-w-xs mx-auto">
+          <p className="text-sm text-gray-500 mb-2 max-w-xs mx-auto">
             Get a personalized 6-week program tailored to your goals and schedule.
+          </p>
+          <p className="text-xs text-gray-400 italic mb-5 max-w-xs mx-auto">
+            Plans are AI-generated and should be used as a guide. Consult a professional for specific medical needs.
           </p>
           {w.planError && <p className="text-red-500 text-sm mb-3">{w.planError}</p>}
           <button
@@ -160,7 +163,7 @@ export default function WorkoutsPage() {
             className="w-full py-3 bg-gradient-to-r from-green-600 to-green-500 text-white rounded-xl font-semibold shadow-md disabled:opacity-60 flex items-center justify-center gap-2"
           >
             {w.generatingPlan ? (
-              <><Loader2 className="w-5 h-5 animate-spin" />Generating\u2026 (~15s)</>
+              <><Loader2 className="w-5 h-5 animate-spin" />Generating\u2026</>
             ) : (
               "\u2728 Try Again"
             )}
