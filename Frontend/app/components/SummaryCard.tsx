@@ -51,7 +51,7 @@ export default function SummaryCard({ summary, summaryLoading }: SummaryCardProp
               {effectiveCalGoal && (
                 <p className="text-sm text-gray-400 mt-1">
                   of {effectiveCalGoal} kcal goal
-                  {aniActive && <span className="ml-1 text-xs font-semibold text-teal-600">[ANI]</span>}
+                  {aniActive && <span className="ml-1 text-xs font-semibold text-amber-600">[ANI]</span>}
                 </p>
               )}
             </div>

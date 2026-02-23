@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
-import { LogOut, Camera, ScanBarcode, X, Loader2, MessageSquare, PenLine } from "lucide-react";
+import Link from "next/link";
+import { LogOut, Camera, ScanBarcode, X, Loader2, MessageSquare, PenLine, Brain } from "lucide-react";
 import BottomNav from "./components/BottomNav";
 import BarcodeScanner from "./components/BarcodeScanner";
 import SummaryCard from "./components/SummaryCard";
@@ -170,6 +171,49 @@ export default function FoodEnoughApp() {
       </header>
 
       <SummaryCard summary={summary} summaryLoading={summaryLoading} />
+
+      {/* ANI progress nudge */}
+      {summary && summary.calorie_goal && !summary.ani_active && summary.ani_days_logged_7d != null && summary.ani_days_logged_7d > 0 && (
+        <section className="px-5 mt-3">
+          <div className="bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200 rounded-2xl p-4">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                <Brain className="w-4 h-4 text-amber-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                {summary.ani_eligible ? (
+                  <p className="text-sm font-semibold text-amber-800">
+                    Your first recalibration is ready!
+                  </p>
+                ) : (
+                  <p className="text-sm text-amber-800">
+                    <span className="font-semibold">{summary.ani_days_logged_7d} of 7 days</span> logged — {7 - summary.ani_days_logged_7d} more until your goals adapt
+                  </p>
+                )}
+              </div>
+            </div>
+            {/* Progress bar: 7 segments */}
+            <div className="flex gap-1 mb-2">
+              {Array.from({ length: 7 }).map((_, i) => (
+                <div
+                  key={i}
+                  className={`h-1.5 flex-1 rounded-full ${
+                    i < summary.ani_days_logged_7d! ? "bg-amber-400" : "bg-amber-200"
+                  }`}
+                />
+              ))}
+            </div>
+            {summary.ani_eligible && (
+              <Link
+                href="/ani"
+                className="block text-center text-sm font-medium text-amber-700 hover:text-amber-800 mt-1"
+              >
+                Go to Adapt &rarr;
+              </Link>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Quick-add favorites */}
       {favorites.length > 0 && (

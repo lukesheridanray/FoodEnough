@@ -21,6 +21,8 @@ interface Summary {
   ani_protein_goal?: number | null;
   ani_carbs_goal?: number | null;
   ani_fat_goal?: number | null;
+  ani_days_logged_7d?: number;
+  ani_eligible?: boolean;
 }
 
 interface ImageItem {

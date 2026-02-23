@@ -2163,6 +2163,32 @@ def get_today_summary(
             ani_carbs_goal = latest_recal.new_carbs_goal
             ani_fat_goal = latest_recal.new_fat_goal
 
+    # ANI readiness: how close is the user to first recalibration?
+    ani_days_logged_7d = 0
+    ani_eligible = False
+    if current_user.is_premium and not ani_active:
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        first_log = (
+            db.query(FoodLog)
+            .filter(FoodLog.user_id == current_user.id)
+            .order_by(FoodLog.timestamp.asc())
+            .first()
+        )
+        if first_log:
+            period_start = now_utc - timedelta(days=7)
+            recent_logs = (
+                db.query(FoodLog)
+                .filter(
+                    FoodLog.user_id == current_user.id,
+                    FoodLog.timestamp >= period_start,
+                    FoodLog.timestamp < now_utc,
+                )
+                .all()
+            )
+            ani_days_logged_7d = len(set(log.timestamp.strftime("%Y-%m-%d") for log in recent_logs))
+            has_enough_history = (now_utc - first_log.timestamp).days >= 7
+            ani_eligible = has_enough_history and ani_days_logged_7d >= 5
+
     # Use ANI goal for calories_remaining if active
     effective_calorie_goal = ani_calorie_goal if ani_active else calorie_goal
     calories_remaining = (effective_calorie_goal - calories_today) if effective_calorie_goal is not None else None
@@ -2187,6 +2213,8 @@ def get_today_summary(
         "ani_protein_goal": ani_protein_goal,
         "ani_carbs_goal": ani_carbs_goal,
         "ani_fat_goal": ani_fat_goal,
+        "ani_days_logged_7d": ani_days_logged_7d,
+        "ani_eligible": ani_eligible,
     }
 
 

@@ -10,7 +10,7 @@ export default function BottomNav() {
   const tabs = [
     { id: "home", icon: Home, label: "Home", href: "/" },
     { id: "diary", icon: BarChart2, label: "Journal", href: "/diary" },
-    { id: "ani", icon: Brain, label: "ANI", href: "/ani" },
+    { id: "ani", icon: Brain, label: "Adapt", href: "/ani" },
     { id: "workouts", icon: Dumbbell, label: "Workouts", href: "/workouts" },
     { id: "profile", icon: User, label: "Profile", href: "/profile" },
   ];
@@ -21,6 +21,9 @@ export default function BottomNav() {
       {tabs.map((tab) => {
         const active = pathname === tab.href;
         const Icon = tab.icon;
+        const isAni = tab.id === "ani";
+        const activeBg = isAni ? "bg-amber-100" : "bg-green-100";
+        const activeText = isAni ? "text-amber-700" : "text-green-700";
         return (
           <button
             key={tab.id}
@@ -29,10 +32,10 @@ export default function BottomNav() {
             aria-current={active ? "page" : undefined}
             className="flex flex-col items-center gap-0.5 px-2 py-1 transition-all"
           >
-            <div className={`p-2 rounded-xl transition-all ${active ? "bg-green-100" : ""}`}>
-              <Icon className={`w-5 h-5 transition-colors ${active ? "text-green-700" : "text-gray-400"}`} />
+            <div className={`p-2 rounded-xl transition-all ${active ? activeBg : ""}`}>
+              <Icon className={`w-5 h-5 transition-colors ${active ? activeText : "text-gray-400"}`} />
             </div>
-            <span className={`text-xs font-medium transition-colors ${active ? "text-green-700" : "text-gray-400"}`}>
+            <span className={`text-xs font-medium transition-colors ${active ? activeText : "text-gray-400"}`}>
               {tab.label}
             </span>
           </button>

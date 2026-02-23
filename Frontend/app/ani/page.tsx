@@ -10,7 +10,7 @@ export default function ANIPage() {
 
   if (ani.loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-green-100 to-green-50 pb-24">
+      <div className="min-h-screen bg-gradient-to-b from-amber-50 to-yellow-50 pb-24">
         <div style={{ height: "max(24px, env(safe-area-inset-top))" }} />
         <header className="px-5 py-3">
           <div className="h-6 w-48 bg-gray-200 rounded animate-pulse" />
@@ -32,12 +32,12 @@ export default function ANIPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-green-100 to-green-50 pb-24">
+    <div className="min-h-screen bg-gradient-to-b from-amber-50 to-yellow-50 pb-24">
       <div style={{ height: "max(24px, env(safe-area-inset-top))" }} />
       <header className="px-5 py-3">
         <div className="flex items-center gap-2">
-          <Brain className="w-6 h-6 text-green-700" />
-          <h1 className="text-xl font-bold text-green-900">Nutrition Intelligence</h1>
+          <Brain className="w-6 h-6 text-amber-700" />
+          <h1 className="text-xl font-bold text-amber-900">Nutrition Intelligence</h1>
         </div>
         <p className="text-sm text-gray-500 mt-0.5">Adaptive goals powered by your data</p>
       </header>

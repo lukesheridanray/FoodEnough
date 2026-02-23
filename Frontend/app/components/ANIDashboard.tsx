@@ -56,22 +56,33 @@ export default function ANIDashboard({ targets, history, insights, recalibrating
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const latestRecal = history.length > 0 ? history[0] : null;
 
-  // Empty state
+  // First-visit explainer
   if (!targets || !targets.ani_active) {
     return (
       <section className="px-5 mt-4">
         <div className="bg-white rounded-2xl shadow-sm p-6 text-center">
-          <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
-            <Brain className="w-7 h-7 text-green-600" />
+          <div className="w-14 h-14 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-4">
+            <Brain className="w-7 h-7 text-amber-600" />
           </div>
-          <h2 className="text-lg font-bold text-gray-900 mb-2">Adaptive Nutrition Intelligence</h2>
-          <p className="text-sm text-gray-500 mb-4">
-            Log your food for at least 7 days, then run your first recalibration to get personalized, adaptive nutrition goals.
-          </p>
+          <h2 className="text-lg font-bold text-gray-900 mb-2">Your Goals, Adapting to You</h2>
+          <div className="text-left space-y-3 mb-5">
+            <div className="flex items-start gap-3">
+              <TrendingUp className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-gray-600">Analyzes your food logs and weight trends</p>
+            </div>
+            <div className="flex items-start gap-3">
+              <RefreshCw className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-gray-600">Adjusts calorie and macro targets weekly</p>
+            </div>
+            <div className="flex items-start gap-3">
+              <Sparkles className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-gray-600">Gets smarter the more you log</p>
+            </div>
+          </div>
           <button
             onClick={onRecalibrate}
             disabled={recalibrating}
-            className="w-full py-2.5 px-4 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+            className="w-full py-2.5 px-4 bg-amber-600 text-white font-semibold rounded-xl hover:bg-amber-700 transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
           >
             {recalibrating ? (
               <>
@@ -83,6 +94,7 @@ export default function ANIDashboard({ targets, history, insights, recalibrating
             )}
           </button>
           {recalError && <p className="text-red-500 text-sm mt-2">{recalError}</p>}
+          <p className="text-xs text-gray-400 mt-3">Requires 7 days of food logging</p>
         </div>
       </section>
     );
@@ -94,11 +106,11 @@ export default function ANIDashboard({ targets, history, insights, recalibrating
     <div className="space-y-4">
       {/* Current Targets Card */}
       <section className="px-5">
-        <div className="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-2xl shadow-sm p-5">
+        <div className="bg-gradient-to-br from-amber-50 to-yellow-50 border border-amber-200 rounded-2xl shadow-sm p-5">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <Brain className="w-5 h-5 text-green-600" />
-              <h2 className="text-base font-bold text-green-900">ANI Targets</h2>
+              <Brain className="w-5 h-5 text-amber-600" />
+              <h2 className="text-base font-bold text-amber-900">ANI Targets</h2>
             </div>
             {targets.last_recalibrated && (
               <span className="text-xs text-gray-500">
@@ -115,7 +127,7 @@ export default function ANIDashboard({ targets, history, insights, recalibrating
                 prev: latestRecal?.prev_goals.calorie_goal,
                 current: targets.calorie_goal!,
                 unit: " kcal",
-                color: "text-green-700",
+                color: "text-amber-700",
               },
               {
                 label: "Protein",
@@ -155,7 +167,7 @@ export default function ANIDashboard({ targets, history, insights, recalibrating
           <button
             onClick={onRecalibrate}
             disabled={recalibrating || !canRecalibrate}
-            className="w-full py-2.5 px-4 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+            className="w-full py-2.5 px-4 bg-amber-600 text-white font-semibold rounded-xl hover:bg-amber-700 transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
           >
             {recalibrating ? (
               <>
@@ -176,7 +188,7 @@ export default function ANIDashboard({ targets, history, insights, recalibrating
       {latestRecal && (
         <section className="px-5">
           <div className="bg-white rounded-2xl shadow-sm p-5">
-            <h2 className="text-base font-bold text-green-900 mb-2">Latest Analysis</h2>
+            <h2 className="text-base font-bold text-amber-900 mb-2">Latest Analysis</h2>
             <p className="text-sm text-gray-600 leading-relaxed">{latestRecal.reasoning}</p>
 
             <div className="mt-4 grid grid-cols-2 gap-2">
@@ -219,7 +231,7 @@ export default function ANIDashboard({ targets, history, insights, recalibrating
       {insights.length > 0 && (
         <section className="px-5">
           <div className="bg-white rounded-2xl shadow-sm p-5">
-            <h2 className="text-base font-bold text-green-900 mb-3">Insights</h2>
+            <h2 className="text-base font-bold text-amber-900 mb-3">Insights</h2>
             <div className="space-y-2">
               {insights.map((insight) => (
                 <div
@@ -246,7 +258,7 @@ export default function ANIDashboard({ targets, history, insights, recalibrating
               onClick={() => setHistoryExpanded(!historyExpanded)}
               className="flex items-center justify-between w-full"
             >
-              <h2 className="text-base font-bold text-green-900">Recalibration History</h2>
+              <h2 className="text-base font-bold text-amber-900">Recalibration History</h2>
               {historyExpanded ? (
                 <ChevronUp className="w-5 h-5 text-gray-400" />
               ) : (

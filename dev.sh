@@ -16,9 +16,11 @@ cleanup() {
 
 trap cleanup EXIT
 
-# Start backend
-echo "Starting backend..."
+# Run DB migrations, then start backend
+echo "Running DB migrations..."
 cd "$SCRIPT_DIR/Backend"
+python -c "from start import ensure_columns; ensure_columns()"
+echo "Starting backend..."
 uvicorn main:app --reload --host 127.0.0.1 --port 8000 &
 BACKEND_PID=$!
 cd "$SCRIPT_DIR"

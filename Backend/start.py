@@ -9,10 +9,9 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./foodenough.db")
 
 def ensure_columns():
     """Add any missing columns to existing tables (safe to run repeatedly)."""
-    if DATABASE_URL.startswith("sqlite"):
-        return  # SQLite uses create_all in main.py
-
     engine = create_engine(DATABASE_URL)
+    is_sqlite = DATABASE_URL.startswith("sqlite")
+    pk_type = "INTEGER PRIMARY KEY AUTOINCREMENT" if is_sqlite else "SERIAL PRIMARY KEY"
     with engine.connect() as conn:
         insp = inspect(engine)
 
@@ -46,9 +45,9 @@ def ensure_columns():
         # Create ANI tables if missing
         if not insp.has_table("ani_recalibrations"):
             print("[STARTUP] Creating ani_recalibrations table...", flush=True)
-            conn.execute(text("""
+            conn.execute(text(f"""
                 CREATE TABLE ani_recalibrations (
-                    id SERIAL PRIMARY KEY,
+                    id {pk_type},
                     user_id INTEGER NOT NULL REFERENCES users(id),
                     created_at TIMESTAMP,
                     period_start TIMESTAMP NOT NULL,
@@ -70,9 +69,9 @@ def ensure_columns():
 
         if not insp.has_table("ani_insights"):
             print("[STARTUP] Creating ani_insights table...", flush=True)
-            conn.execute(text("""
+            conn.execute(text(f"""
                 CREATE TABLE ani_insights (
-                    id SERIAL PRIMARY KEY,
+                    id {pk_type},
                     user_id INTEGER NOT NULL REFERENCES users(id),
                     recalibration_id INTEGER REFERENCES ani_recalibrations(id),
                     created_at TIMESTAMP,
