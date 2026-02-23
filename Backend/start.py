@@ -28,6 +28,10 @@ def ensure_columns():
                 print("[STARTUP] Adding verification_token to users...", flush=True)
                 conn.execute(text("ALTER TABLE users ADD COLUMN verification_token VARCHAR"))
 
+            if "is_premium" not in user_cols:
+                print("[STARTUP] Adding is_premium to users...", flush=True)
+                conn.execute(text("ALTER TABLE users ADD COLUMN is_premium INTEGER DEFAULT 1"))
+
             conn.commit()
 
         # Check food_logs table columns
@@ -38,6 +42,47 @@ def ensure_columns():
                 print("[STARTUP] Adding meal_type to food_logs...", flush=True)
                 conn.execute(text("ALTER TABLE food_logs ADD COLUMN meal_type VARCHAR"))
                 conn.commit()
+
+        # Create ANI tables if missing
+        if not insp.has_table("ani_recalibrations"):
+            print("[STARTUP] Creating ani_recalibrations table...", flush=True)
+            conn.execute(text("""
+                CREATE TABLE ani_recalibrations (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    created_at TIMESTAMP,
+                    period_start TIMESTAMP NOT NULL,
+                    period_end TIMESTAMP NOT NULL,
+                    prev_calorie_goal INTEGER NOT NULL,
+                    prev_protein_goal INTEGER NOT NULL,
+                    prev_carbs_goal INTEGER NOT NULL,
+                    prev_fat_goal INTEGER NOT NULL,
+                    new_calorie_goal INTEGER NOT NULL,
+                    new_protein_goal INTEGER NOT NULL,
+                    new_carbs_goal INTEGER NOT NULL,
+                    new_fat_goal INTEGER NOT NULL,
+                    analysis_json TEXT,
+                    reasoning TEXT NOT NULL
+                )
+            """))
+            conn.execute(text("CREATE INDEX ix_ani_recalibrations_user_id ON ani_recalibrations (user_id)"))
+            conn.commit()
+
+        if not insp.has_table("ani_insights"):
+            print("[STARTUP] Creating ani_insights table...", flush=True)
+            conn.execute(text("""
+                CREATE TABLE ani_insights (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    recalibration_id INTEGER REFERENCES ani_recalibrations(id),
+                    created_at TIMESTAMP,
+                    insight_type VARCHAR NOT NULL,
+                    title VARCHAR NOT NULL,
+                    body TEXT NOT NULL
+                )
+            """))
+            conn.execute(text("CREATE INDEX ix_ani_insights_user_id ON ani_insights (user_id)"))
+            conn.commit()
 
         print("[STARTUP] Database columns verified.", flush=True)
 
