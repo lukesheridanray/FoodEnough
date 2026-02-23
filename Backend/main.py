@@ -30,6 +30,7 @@ import sys
 import base64
 import smtplib
 import ssl
+import threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -712,15 +713,17 @@ def register(request: Request, data: RegisterInput, db: Session = Depends(get_db
     db.commit()
     db.refresh(user)
 
-    # Send verification email (non-blocking — don't fail signup if email fails)
+    # Send verification + admin emails in background thread (don't block signup)
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
     verify_url = f"{frontend_url}/verify-email?token={verify_token}"
-    sent = send_verification_email(email, verify_url)
-    if not sent:
-        print(f"\n[DEV] Verification URL for {email}:\n{verify_url}\n", flush=True)
 
-    # Notify admin of new signup
-    send_admin_signup_notification(email)
+    def _send_emails():
+        sent = send_verification_email(email, verify_url)
+        if not sent:
+            print(f"\n[DEV] Verification URL for {email}:\n{verify_url}\n", flush=True)
+        send_admin_signup_notification(email)
+
+    threading.Thread(target=_send_emails, daemon=True).start()
 
     token = create_access_token(user.id)
     return {"access_token": token, "token_type": "bearer"}
