@@ -1,5 +1,5 @@
 "use client";
-import { CheckCircle2, Circle, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { CheckCircle2, Circle, ChevronDown, ChevronUp, Loader2, Flame } from "lucide-react";
 import { ActivePlan, FitnessProfile } from "../hooks/useWorkouts";
 
 const DAY_NAMES: Record<number, string[]> = {
@@ -178,8 +178,16 @@ export default function WorkoutPlanView({
                                 {session.name}
                               </span>
                             </div>
-                            <div className="text-xs text-gray-400 mt-0.5">
-                              {session.exercises.length} exercises
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-xs text-gray-400">
+                                {session.exercises.length} exercises
+                              </span>
+                              {session.estimated_calories ? (
+                                <span className="flex items-center gap-0.5 text-xs font-medium text-orange-500">
+                                  <Flame className="w-3 h-3" />
+                                  ~{session.estimated_calories} kcal
+                                </span>
+                              ) : null}
                             </div>
                           </button>
                           {!session.is_completed && (

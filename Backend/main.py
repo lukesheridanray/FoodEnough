@@ -492,6 +492,108 @@ def calculate_nutrition_goals(
 
 
 # ============================================================
+# Workout Calorie Estimation (MET-based)
+# ============================================================
+_EXERCISE_MET: dict = {
+    # Compound barbell
+    "squat": 6.0, "back squat": 6.0, "front squat": 6.0, "goblet squat": 5.0,
+    "deadlift": 6.0, "romanian deadlift": 5.0, "sumo deadlift": 6.0,
+    "bench press": 5.0, "incline bench press": 5.0, "decline bench press": 5.0,
+    "overhead press": 5.0, "military press": 5.0, "push press": 5.5,
+    "barbell row": 5.0, "bent over row": 5.0, "pendlay row": 5.0,
+    "clean": 6.0, "power clean": 6.0, "clean and jerk": 6.5, "snatch": 6.5,
+    "hip thrust": 5.0, "barbell hip thrust": 5.0,
+    # Dumbbell / cable isolation
+    "dumbbell curl": 3.5, "bicep curl": 3.5, "hammer curl": 3.5,
+    "tricep pushdown": 3.5, "tricep extension": 3.5, "skull crusher": 3.5,
+    "lateral raise": 3.0, "front raise": 3.0, "rear delt fly": 3.0,
+    "face pull": 3.0, "cable fly": 3.5, "chest fly": 3.5,
+    "leg curl": 4.0, "leg extension": 4.0, "calf raise": 3.0,
+    "leg press": 5.0,
+    # Bodyweight
+    "push up": 4.0, "pushup": 4.0, "pull up": 5.0, "pullup": 5.0,
+    "chin up": 5.0, "dip": 5.0, "lunge": 5.0, "walking lunge": 5.0,
+    "burpee": 8.0, "mountain climber": 8.0, "plank": 3.0,
+    # Machine
+    "lat pulldown": 4.5, "seated row": 4.5, "cable row": 4.5,
+    "chest press": 4.5, "shoulder press machine": 4.0,
+    # Cardio-style
+    "kettlebell swing": 6.0, "battle rope": 8.0, "box jump": 7.0,
+    "jumping jack": 7.0, "jump rope": 8.0,
+}
+_DEFAULT_MET = 4.0  # generic strength training
+_SECONDS_PER_REP = 3.5  # average time under tension per rep
+
+
+def _parse_rep_count(reps_str: str) -> int:
+    """Parse reps string like '10', '8-12', '30s' into a representative number."""
+    reps_str = str(reps_str).strip().lower()
+    # Duration-based like "30s" or "60s"
+    m = re.match(r"(\d+)\s*s(?:ec)?", reps_str)
+    if m:
+        return int(m.group(1))  # treat seconds as-is, caller handles
+    # Range like "8-12" -> use midpoint
+    m = re.match(r"(\d+)\s*-\s*(\d+)", reps_str)
+    if m:
+        return (int(m.group(1)) + int(m.group(2))) // 2
+    # Plain number
+    m = re.match(r"(\d+)", reps_str)
+    if m:
+        return int(m.group(1))
+    return 10  # safe default
+
+
+def estimate_workout_calories(exercises: list, weight_kg: float) -> dict:
+    """
+    Estimate calories burned for a list of exercises using MET values.
+    exercises: list of dicts with keys name, sets, reps, rest_seconds
+    weight_kg: user body weight in kilograms
+    Returns: { estimated_calories: int, duration_minutes: int }
+    """
+    total_seconds = 0.0
+    total_calories = 0.0
+
+    for ex in exercises:
+        name = (ex.get("name") or "").strip().lower()
+        sets = int(ex.get("sets") or 3)
+        reps_raw = ex.get("reps", "10")
+        rest_sec = int(ex.get("rest_seconds") or 60)
+
+        rep_count = _parse_rep_count(str(reps_raw))
+
+        # If reps field was duration-based (e.g. "30s"), work_time = that value
+        is_timed = bool(re.match(r"\d+\s*s(?:ec)?", str(reps_raw).strip().lower()))
+        if is_timed:
+            work_time_per_set = float(rep_count)
+        else:
+            work_time_per_set = rep_count * _SECONDS_PER_REP
+
+        exercise_duration_sec = sets * (work_time_per_set + rest_sec)
+        total_seconds += exercise_duration_sec
+
+        # Look up MET — try exact match, then substring match
+        met = _EXERCISE_MET.get(name)
+        if met is None:
+            for key, val in _EXERCISE_MET.items():
+                if key in name or name in key:
+                    met = val
+                    break
+        if met is None:
+            met = _DEFAULT_MET
+
+        duration_min = exercise_duration_sec / 60.0
+        # Calorie formula: (MET * 3.5 * weight_kg / 200) * duration_minutes
+        cals = (met * 3.5 * weight_kg / 200.0) * duration_min
+        total_calories += cals
+
+    duration_minutes = round(total_seconds / 60.0)
+    return {
+        "estimated_calories": max(1, round(total_calories)),
+        "duration_minutes": duration_minutes,
+    }
+
+
+# ============================================================
 # ANI Recalibration Engine (pure math, no AI API)
 # ============================================================
 def run_recalibration(
@@ -2592,6 +2694,15 @@ def get_active_plan(
         .all()
     )
 
+    # Get user weight for calorie estimation
+    latest_weight = (
+        db.query(WeightEntry)
+        .filter(WeightEntry.user_id == current_user.id)
+        .order_by(WeightEntry.timestamp.desc())
+        .first()
+    )
+    weight_kg = (latest_weight.weight_lbs * 0.453592) if latest_weight else 70.0
+
     # Group sessions by week number
     weeks: dict = {}
     for s in sessions:
@@ -2602,6 +2713,7 @@ def get_active_plan(
             exercises = json.loads(s.exercises_json) if s.exercises_json else []
         except Exception:
             exercises = []
+        est = estimate_workout_calories(exercises, weight_kg) if exercises else {"estimated_calories": 0}
         weeks[wk].append({
             "id": s.id,
             "day_number": s.day_number,
@@ -2609,6 +2721,7 @@ def get_active_plan(
             "exercises": exercises,
             "is_completed": bool(s.is_completed),
             "completed_at": s.completed_at.isoformat() if s.completed_at else None,
+            "estimated_calories": est["estimated_calories"],
         })
 
     total_sessions = len(sessions)
@@ -2661,6 +2774,7 @@ def deactivate_workout_plan(
 def complete_plan_session(
     request: Request,
     session_id: int,
+    tz_offset_minutes: int = Query(default=0, ge=-720, le=840),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -2680,8 +2794,51 @@ def complete_plan_session(
         return {"status": "already_completed"}
     session.is_completed = 1
     session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    # --- Estimate calories burned and auto-log to health_metrics ---
+    estimated_calories = 0
+    try:
+        exercises = json.loads(session.exercises_json) if session.exercises_json else []
+    except Exception:
+        exercises = []
+
+    if exercises:
+        # Get user's latest weight
+        latest_weight = (
+            db.query(WeightEntry)
+            .filter(WeightEntry.user_id == current_user.id)
+            .order_by(WeightEntry.timestamp.desc())
+            .first()
+        )
+        weight_kg = (latest_weight.weight_lbs * 0.453592) if latest_weight else 70.0
+
+        result = estimate_workout_calories(exercises, weight_kg)
+        estimated_calories = result["estimated_calories"]
+
+        # Resolve today's local date
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        local_now = now_utc + timedelta(minutes=tz_offset_minutes)
+        date_str = local_now.strftime("%Y-%m-%d")
+
+        # Upsert into health_metrics — add to existing active_calories
+        existing = (
+            db.query(HealthMetric)
+            .filter(HealthMetric.user_id == current_user.id, HealthMetric.date == date_str)
+            .first()
+        )
+        if existing:
+            existing.active_calories = (existing.active_calories or 0) + estimated_calories
+            existing.updated_at = datetime.utcnow()
+        else:
+            db.add(HealthMetric(
+                user_id=current_user.id,
+                date=date_str,
+                active_calories=estimated_calories,
+                source="workout_estimate",
+            ))
+
     db.commit()
-    return {"status": "completed"}
+    return {"status": "completed", "estimated_calories": estimated_calories}
 
 
 # ============================================================

@@ -29,6 +29,7 @@ interface PlanSession {
   exercises: Exercise[];
   is_completed: boolean;
   completed_at: string | null;
+  estimated_calories?: number;
 }
 
 interface PlanWeek {
@@ -211,15 +212,18 @@ export function useWorkouts() {
   const handleCompleteSession = async (sessionId: number) => {
     setCompletingSession(sessionId);
     try {
-      const res = await apiFetch(`/plan-sessions/${sessionId}/complete`, { method: "PUT" });
+      const tzOffset = new Date().getTimezoneOffset() * -1;
+      const res = await apiFetch(`/plan-sessions/${sessionId}/complete?tz_offset_minutes=${tzOffset}`, { method: "PUT" });
       if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const estimatedCalories = data.estimated_calories || 0;
         setActivePlan((prev) => {
           if (!prev) return prev;
           const now = new Date().toISOString();
           const updatedWeeks = prev.weeks.map((w) => ({
             ...w,
             sessions: w.sessions.map((s) =>
-              s.id === sessionId ? { ...s, is_completed: true, completed_at: now } : s
+              s.id === sessionId ? { ...s, is_completed: true, completed_at: now, estimated_calories: estimatedCalories } : s
             ),
           }));
           const completedCount = updatedWeeks
