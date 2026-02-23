@@ -8,7 +8,8 @@ import HealthSurvey from "../components/HealthSurvey";
 import WeightTracker from "../components/WeightTracker";
 import GoalProgress from "../components/GoalProgress";
 import { useProfile } from "../hooks/useProfile";
-import { LogOut } from "lucide-react";
+import { LogOut, BarChart3 } from "lucide-react";
+import Link from "next/link";
 
 const COMMON_TIMEZONES = [
   "America/New_York",
@@ -179,6 +180,24 @@ export default function ProfilePage() {
         loading={p.loading}
         onLogWeight={p.handleLogWeight}
       />
+
+      {/* Premium Analytics link */}
+      <section className="px-5 mt-6">
+        <Link
+          href="/analytics"
+          className="block bg-gradient-to-r from-blue-50 to-indigo-50 border border-indigo-200 rounded-2xl p-4 hover:shadow-md transition-shadow"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
+              <BarChart3 className="w-5 h-5 text-indigo-600" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-indigo-900">Premium Analytics</p>
+              <p className="text-xs text-indigo-600">Trends, streaks, projections & more</p>
+            </div>
+          </div>
+        </Link>
+      </section>
 
       {/* Timezone Setting */}
       <section className="px-5 mt-6">

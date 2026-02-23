@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getToken, formatDate } from "../../lib/auth";
 import { apiFetch, UnauthorizedError } from "../../lib/api";
+import Link from "next/link";
 import BottomNav from "../components/BottomNav";
+import { Flame, Footprints, BarChart3 } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -37,6 +39,7 @@ interface LogEntry {
 
 interface DailyGroup {
   date: string;
+  isoDate: string; // "YYYY-MM-DD" for matching health metrics
   entries: LogEntry[];
   total: {
     calories: number;
@@ -59,6 +62,13 @@ interface WeekTotal {
   sodium: number;
 }
 
+interface HealthMetricDay {
+  date: string;
+  total_expenditure: number | null;
+  active_calories: number | null;
+  steps: number | null;
+}
+
 export default function DiaryPage() {
   const [dailyLogs, setDailyLogs] = useState<DailyGroup[]>([]);
   const [weekTotal, setWeekTotal] = useState<WeekTotal>({
@@ -69,6 +79,7 @@ export default function DiaryPage() {
   const [error, setError] = useState("");
   const [weekOffset, setWeekOffset] = useState(0);
   const [expandedEntries, setExpandedEntries] = useState<Record<string, boolean>>({});
+  const [healthMetrics, setHealthMetrics] = useState<Record<string, HealthMetricDay>>({});
   const router = useRouter();
 
   useEffect(() => {
@@ -87,11 +98,17 @@ export default function DiaryPage() {
 
         const data = await res.json();
         const grouped: Record<string, LogEntry[]> = {};
+        const isoDateMap: Record<string, string> = {}; // displayDate -> isoDate
         const totals: WeekTotal = { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, sugar: 0, sodium: 0 };
 
         for (const log of data.logs) {
           const date = formatDate(log.timestamp);
           if (!grouped[date]) grouped[date] = [];
+          // Track the ISO date (YYYY-MM-DD) from timestamp
+          if (!isoDateMap[date]) {
+            const ts = log.timestamp.endsWith("Z") ? log.timestamp : log.timestamp + "Z";
+            isoDateMap[date] = new Date(ts).toISOString().slice(0, 10);
+          }
 
           const parsed =
             typeof log.parsed_json === "string"
@@ -134,11 +151,28 @@ export default function DiaryPage() {
             }),
             { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, sugar: 0, sodium: 0 }
           );
-          return { date, entries, total };
+          return { date, isoDate: isoDateMap[date] || "", entries, total };
         });
 
         setDailyLogs(output);
         setWeekTotal(totals);
+
+        // Fetch health metrics for same week
+        try {
+          const healthRes = await apiFetch(`/health/week?offset_days=${weekOffset * 7}`);
+          if (healthRes.ok) {
+            const healthData = await healthRes.json();
+            const metricsMap: Record<string, HealthMetricDay> = {};
+            for (const m of healthData.metrics || []) {
+              if (m.total_expenditure != null || m.active_calories != null || m.steps != null) {
+                metricsMap[m.date] = m;
+              }
+            }
+            setHealthMetrics(metricsMap);
+          }
+        } catch {
+          // non-critical, ignore
+        }
       } catch (err) {
         if (err instanceof UnauthorizedError) { router.push("/login"); return; }
         setError("Failed to load diary. Please try again.");
@@ -287,6 +321,29 @@ export default function DiaryPage() {
                 {group.total.sugar  > 0 && <span className="text-xs px-1.5 py-0.5 bg-pink-50 text-pink-600 rounded-md font-semibold">{Math.round(group.total.sugar)}g sugar</span>}
                 {group.total.sodium > 0 && <span className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded-md font-semibold">{Math.round(group.total.sodium)}mg Na</span>}
               </div>
+              {/* Activity data for this day */}
+              {healthMetrics[group.isoDate] && (
+                <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
+                  {healthMetrics[group.isoDate].active_calories != null && (
+                    <span className="flex items-center gap-1">
+                      <Flame className="w-3 h-3 text-orange-400" />
+                      Active: {healthMetrics[group.isoDate].active_calories} kcal
+                    </span>
+                  )}
+                  {healthMetrics[group.isoDate].total_expenditure != null && !healthMetrics[group.isoDate].active_calories && (
+                    <span className="flex items-center gap-1">
+                      <Flame className="w-3 h-3 text-orange-400" />
+                      Burn: {healthMetrics[group.isoDate].total_expenditure} kcal
+                    </span>
+                  )}
+                  {healthMetrics[group.isoDate].steps != null && (
+                    <span className="flex items-center gap-1">
+                      <Footprints className="w-3 h-3 text-blue-400" />
+                      {healthMetrics[group.isoDate].steps!.toLocaleString()} steps
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -351,6 +408,22 @@ export default function DiaryPage() {
             </table>
           </div>
         </>)}
+
+        {/* Premium Analytics link */}
+        <Link
+          href="/analytics"
+          className="block bg-gradient-to-r from-blue-50 to-indigo-50 border border-indigo-200 rounded-2xl p-4 mb-6 hover:shadow-md transition-shadow"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
+              <BarChart3 className="w-5 h-5 text-indigo-600" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-indigo-900">Premium Analytics</p>
+              <p className="text-xs text-indigo-600">Trends, streaks, projections & more</p>
+            </div>
+          </div>
+        </Link>
 
         <BottomNav />
       </div>

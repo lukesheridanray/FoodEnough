@@ -83,6 +83,26 @@ def ensure_columns():
             conn.execute(text("CREATE INDEX ix_ani_insights_user_id ON ani_insights (user_id)"))
             conn.commit()
 
+        if not insp.has_table("health_metrics"):
+            print("[STARTUP] Creating health_metrics table...", flush=True)
+            conn.execute(text(f"""
+                CREATE TABLE health_metrics (
+                    id {pk_type},
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    date VARCHAR NOT NULL,
+                    total_expenditure FLOAT,
+                    active_calories FLOAT,
+                    resting_calories FLOAT,
+                    steps INTEGER,
+                    source VARCHAR DEFAULT 'manual',
+                    created_at TIMESTAMP,
+                    updated_at TIMESTAMP
+                )
+            """))
+            conn.execute(text("CREATE INDEX ix_health_metrics_user_id ON health_metrics (user_id)"))
+            conn.execute(text("CREATE UNIQUE INDEX ix_health_metrics_user_date ON health_metrics (user_id, date)"))
+            conn.commit()
+
         print("[STARTUP] Database columns verified.", flush=True)
 
     engine.dispose()

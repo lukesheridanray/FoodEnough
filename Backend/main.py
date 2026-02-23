@@ -105,6 +105,7 @@ class User(Base):
     fitness_profile = relationship("FitnessProfile", back_populates="user", uselist=False)
     workout_plans = relationship("WorkoutPlan", back_populates="user")
     ani_recalibrations = relationship("ANIRecalibration", back_populates="user")
+    health_metrics = relationship("HealthMetric", back_populates="user")
 
 
 class FoodLog(Base):
@@ -232,6 +233,27 @@ class ANIInsight(Base):
     insight_type = Column(String, nullable=False)  # pattern, achievement, warning, tip
     title = Column(String, nullable=False)
     body = Column(Text, nullable=False)
+
+
+class HealthMetric(Base):
+    __tablename__ = "health_metrics"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    date = Column(String, nullable=False)  # "YYYY-MM-DD", one row per user per day
+    total_expenditure = Column(Float, nullable=True)
+    active_calories = Column(Float, nullable=True)
+    resting_calories = Column(Float, nullable=True)
+    steps = Column(Integer, nullable=True)
+    source = Column(String, default="manual")  # 'manual', 'healthkit', 'health_connect'
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    user = relationship("User", back_populates="health_metrics")
+
+    __table_args__ = (
+        # Unique constraint: one row per user per day
+        {"sqlite_autoincrement": True},
+    )
 
 
 if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
@@ -478,6 +500,7 @@ def run_recalibration(
     weight_entries: list,
     plan_sessions: list,
     current_goals: dict,
+    health_metrics: list = None,
 ) -> dict:
     """
     Analyze 7 days of data and return adjusted goals.
@@ -604,6 +627,19 @@ def run_recalibration(
                     "title": "Gaining on pace",
                     "body": f"Your {round(weight_delta, 1)} lb gain is in the ideal range for lean muscle building.",
                 })
+            elif (weight_delta or 0) > 1.5:
+                # Gaining too fast — risk of excess fat gain
+                new_cal *= 0.97
+                reasoning_parts.append(
+                    f"You gained {round(weight_delta, 1)} lbs this week — faster than ideal for lean gains. "
+                    f"Reducing calories by 3% to minimize fat gain while maintaining surplus."
+                )
+                insights.append({
+                    "type": "warning",
+                    "title": "Gaining too fast",
+                    "body": f"Your {round(weight_delta, 1)} lb gain exceeds the 1-1.5 lb/week target. "
+                            f"A slight calorie reduction will help keep gains lean.",
+                })
         else:  # maintain
             if weight_delta is not None and abs(weight_delta) < 0.5:
                 reasoning_parts.append(
@@ -668,6 +704,61 @@ def run_recalibration(
             "body": f"You completed {completed_sessions} of {total_planned} sessions ({round(workout_adherence * 100)}%). Great discipline!",
         })
 
+    # Expenditure analysis from health metrics
+    avg_expenditure = None
+    expenditure_vs_estimate = None
+    if health_metrics:
+        expenditure_values = [m.total_expenditure for m in health_metrics if m.total_expenditure is not None]
+        if len(expenditure_values) >= 3:
+            avg_expenditure = sum(expenditure_values) / len(expenditure_values)
+
+            # Estimate TDEE from user profile (Mifflin-St Jeor)
+            estimated_tdee = None
+            if user.height_cm and user.age and user.sex and user.activity_level:
+                latest_w = sorted(weight_entries, key=lambda w: w.timestamp)[-1].weight_lbs if weight_entries else None
+                if latest_w:
+                    est_goals = calculate_nutrition_goals(
+                        weight_lbs=latest_w,
+                        height_cm=user.height_cm,
+                        age=user.age,
+                        sex=user.sex,
+                        activity_level=user.activity_level,
+                        goal="maintain",
+                    )
+                    estimated_tdee = est_goals["tdee"]
+
+            if estimated_tdee:
+                expenditure_vs_estimate = avg_expenditure - estimated_tdee
+
+                if expenditure_vs_estimate > 300:
+                    # Actual burn higher than estimated — bump calories
+                    bump = min(expenditure_vs_estimate * 0.30, prev_cal * 0.05)
+                    new_cal += bump
+                    reasoning_parts.append(
+                        f"Your actual calorie burn ({round(avg_expenditure)} kcal/day) exceeds estimated TDEE ({estimated_tdee} kcal) by {round(expenditure_vs_estimate)} kcal. "
+                        f"Raising calorie target by {round(bump)} kcal to fuel your higher activity."
+                    )
+                    insights.append({
+                        "type": "pattern",
+                        "title": "Higher actual activity",
+                        "body": f"You're burning ~{round(expenditure_vs_estimate)} kcal more per day than your profile suggests. "
+                                f"Your calorie target has been adjusted upward.",
+                    })
+                elif expenditure_vs_estimate < -200:
+                    # Actual burn lower than estimated — reduce calories
+                    reduction = min(abs(expenditure_vs_estimate) * 0.30, prev_cal * 0.05)
+                    new_cal -= reduction
+                    reasoning_parts.append(
+                        f"Your actual calorie burn ({round(avg_expenditure)} kcal/day) is below estimated TDEE ({estimated_tdee} kcal) by {round(abs(expenditure_vs_estimate))} kcal. "
+                        f"Reducing calorie target by {round(reduction)} kcal to match actual activity."
+                    )
+                    insights.append({
+                        "type": "pattern",
+                        "title": "Lower actual activity",
+                        "body": f"You're burning ~{round(abs(expenditure_vs_estimate))} kcal less per day than your profile suggests. "
+                                f"Your calorie target has been adjusted downward.",
+                    })
+
     # Consistent over-eating (non-lose goal)
     if consistent_over and goal_type != "lose":
         adjustment = min((avg_cal - prev_cal) / 2, prev_cal * 0.10)
@@ -722,6 +813,8 @@ def run_recalibration(
         "weight_delta": round(weight_delta, 1) if weight_delta is not None else None,
         "workout_adherence": round(workout_adherence * 100),
         "patterns": patterns,
+        "avg_expenditure": round(avg_expenditure) if avg_expenditure is not None else None,
+        "expenditure_vs_estimate": round(expenditure_vs_estimate) if expenditure_vs_estimate is not None else None,
     }
 
     return {
@@ -1029,6 +1122,38 @@ class ManualLogInput(BaseModel):
         return v
 
 
+class HealthMetricInput(BaseModel):
+    date: Optional[str] = None  # "YYYY-MM-DD", defaults to today
+    total_expenditure: Optional[float] = None
+    active_calories: Optional[float] = None
+    resting_calories: Optional[float] = None
+    steps: Optional[int] = None
+
+    @field_validator("total_expenditure", "active_calories", "resting_calories")
+    @classmethod
+    def calorie_range(cls, v):
+        if v is not None and (v < 0 or v > 50000):
+            raise ValueError("Calorie values must be between 0 and 50000")
+        return v
+
+    @field_validator("steps")
+    @classmethod
+    def steps_range(cls, v):
+        if v is not None and (v < 0 or v > 500000):
+            raise ValueError("Steps must be between 0 and 500000")
+        return v
+
+    @field_validator("date")
+    @classmethod
+    def date_format(cls, v):
+        if v is not None:
+            try:
+                datetime.strptime(v, "%Y-%m-%d")
+            except ValueError:
+                raise ValueError("Date must be in YYYY-MM-DD format")
+        return v
+
+
 # ============================================================
 # Auth Endpoints
 # ============================================================
@@ -1189,6 +1314,8 @@ def delete_account(
     email = current_user.email
 
     try:
+        # Delete health metrics
+        db.query(HealthMetric).filter(HealthMetric.user_id == user_id).delete(synchronize_session=False)
         # Delete ANI data first (insights FK to recalibrations)
         db.query(ANIInsight).filter(ANIInsight.user_id == user_id).delete(synchronize_session=False)
         db.query(ANIRecalibration).filter(ANIRecalibration.user_id == user_id).delete(synchronize_session=False)
@@ -2649,6 +2776,17 @@ def ani_recalibrate(
             .all()
         )
 
+    # Get health metrics for the period
+    period_date_strings = [(period_start + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(8)]
+    health_metrics = (
+        db.query(HealthMetric)
+        .filter(
+            HealthMetric.user_id == current_user.id,
+            HealthMetric.date.in_(period_date_strings),
+        )
+        .all()
+    )
+
     current_goals = {
         "calorie_goal": current_user.calorie_goal,
         "protein_goal": current_user.protein_goal,
@@ -2656,7 +2794,7 @@ def ani_recalibrate(
         "fat_goal": current_user.fat_goal or 0,
     }
 
-    result = run_recalibration(current_user, food_logs, weight_entries, plan_sessions, current_goals)
+    result = run_recalibration(current_user, food_logs, weight_entries, plan_sessions, current_goals, health_metrics=health_metrics)
 
     # Persist recalibration
     recal = ANIRecalibration(
@@ -2834,4 +2972,759 @@ def ani_insights(
             }
             for i in insights
         ]
+    }
+
+
+# ============================================================
+# Health Integration Endpoints
+# ============================================================
+@app.post("/health/daily")
+@limiter.limit("30/minute")
+def upsert_health_daily(
+    request: Request,
+    data: HealthMetricInput,
+    tz_offset_minutes: int = Query(default=0, ge=-720, le=840),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Upsert daily health metrics (one row per user per day)."""
+    # At least one metric required
+    if data.total_expenditure is None and data.active_calories is None and data.resting_calories is None and data.steps is None:
+        raise HTTPException(status_code=422, detail="At least one metric (total_expenditure, active_calories, resting_calories, or steps) is required.")
+
+    # Resolve date
+    if data.date:
+        date_str = data.date
+    else:
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        local_now = now_utc + timedelta(minutes=tz_offset_minutes)
+        date_str = local_now.strftime("%Y-%m-%d")
+
+    # Upsert: find existing or create
+    existing = (
+        db.query(HealthMetric)
+        .filter(HealthMetric.user_id == current_user.id, HealthMetric.date == date_str)
+        .first()
+    )
+
+    if existing:
+        if data.total_expenditure is not None:
+            existing.total_expenditure = data.total_expenditure
+        if data.active_calories is not None:
+            existing.active_calories = data.active_calories
+        if data.resting_calories is not None:
+            existing.resting_calories = data.resting_calories
+        if data.steps is not None:
+            existing.steps = data.steps
+        existing.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(existing)
+        metric = existing
+    else:
+        metric = HealthMetric(
+            user_id=current_user.id,
+            date=date_str,
+            total_expenditure=data.total_expenditure,
+            active_calories=data.active_calories,
+            resting_calories=data.resting_calories,
+            steps=data.steps,
+            source="manual",
+        )
+        db.add(metric)
+        db.commit()
+        db.refresh(metric)
+
+    return {
+        "status": "success",
+        "metric": {
+            "id": metric.id,
+            "date": metric.date,
+            "total_expenditure": metric.total_expenditure,
+            "active_calories": metric.active_calories,
+            "resting_calories": metric.resting_calories,
+            "steps": metric.steps,
+            "source": metric.source,
+        },
+    }
+
+
+@app.get("/health/today")
+@limiter.limit("60/minute")
+def get_health_today(
+    request: Request,
+    tz_offset_minutes: int = Query(default=0, ge=-720, le=840),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Returns today's health metrics (or nulls if none)."""
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    local_now = now_utc + timedelta(minutes=tz_offset_minutes)
+    date_str = local_now.strftime("%Y-%m-%d")
+
+    metric = (
+        db.query(HealthMetric)
+        .filter(HealthMetric.user_id == current_user.id, HealthMetric.date == date_str)
+        .first()
+    )
+
+    if not metric:
+        return {
+            "date": date_str,
+            "total_expenditure": None,
+            "active_calories": None,
+            "resting_calories": None,
+            "steps": None,
+            "source": None,
+        }
+
+    return {
+        "date": metric.date,
+        "total_expenditure": metric.total_expenditure,
+        "active_calories": metric.active_calories,
+        "resting_calories": metric.resting_calories,
+        "steps": metric.steps,
+        "source": metric.source,
+    }
+
+
+@app.get("/health/week")
+@limiter.limit("60/minute")
+def get_health_week(
+    request: Request,
+    offset_days: int = Query(default=0, ge=0, le=365),
+    tz_offset_minutes: int = Query(default=0, ge=-720, le=840),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Returns 7 days of health metrics."""
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    local_now = now_utc + timedelta(minutes=tz_offset_minutes)
+    end_date = local_now - timedelta(days=offset_days)
+    start_date = end_date - timedelta(days=7)
+
+    # Build date strings for the 7-day window
+    date_strings = []
+    for i in range(7):
+        d = start_date + timedelta(days=i + 1)
+        date_strings.append(d.strftime("%Y-%m-%d"))
+
+    metrics = (
+        db.query(HealthMetric)
+        .filter(
+            HealthMetric.user_id == current_user.id,
+            HealthMetric.date.in_(date_strings),
+        )
+        .all()
+    )
+
+    metrics_by_date = {m.date: m for m in metrics}
+
+    result = []
+    for ds in date_strings:
+        m = metrics_by_date.get(ds)
+        result.append({
+            "date": ds,
+            "total_expenditure": m.total_expenditure if m else None,
+            "active_calories": m.active_calories if m else None,
+            "resting_calories": m.resting_calories if m else None,
+            "steps": m.steps if m else None,
+            "source": m.source if m else None,
+        })
+
+    return {"metrics": result}
+
+
+# ============================================================
+# POST /ani/auto-recalibrate  — cron-triggered weekly recalibration
+# ============================================================
+ANI_CRON_API_KEY = os.getenv("ANI_CRON_API_KEY", "")
+
+
+@app.post("/ani/auto-recalibrate")
+@limiter.limit("5/minute")
+def ani_auto_recalibrate(
+    request: Request,
+    api_key: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Automated weekly recalibration for all eligible premium users.
+    Protected by ANI_CRON_API_KEY (not user auth). Designed for cron jobs."""
+    expected_key = ANI_CRON_API_KEY
+    if not expected_key or api_key != expected_key:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    cutoff = now - timedelta(days=7)
+
+    # Find premium users with at least one prior recalibration whose last was 7+ days ago
+    eligible_users = (
+        db.query(User)
+        .filter(User.is_premium == 1)
+        .all()
+    )
+
+    processed = 0
+    recalibrated = 0
+    skipped = 0
+    errors = 0
+
+    for user in eligible_users:
+        try:
+            # Check last recalibration exists and is 7+ days old
+            last_recal = (
+                db.query(ANIRecalibration)
+                .filter(ANIRecalibration.user_id == user.id)
+                .order_by(ANIRecalibration.created_at.desc())
+                .first()
+            )
+            if not last_recal or (now - last_recal.created_at).days < 7:
+                skipped += 1
+                continue
+
+            if not user.calorie_goal or not user.protein_goal:
+                skipped += 1
+                continue
+
+            processed += 1
+
+            # Gather data for last 7 days
+            period_start = now - timedelta(days=7)
+            period_end = now
+
+            food_logs = (
+                db.query(FoodLog)
+                .filter(FoodLog.user_id == user.id, FoodLog.timestamp >= period_start, FoodLog.timestamp < period_end)
+                .all()
+            )
+
+            logged_days = len(set(log.timestamp.strftime("%Y-%m-%d") for log in food_logs))
+            if logged_days < 5:
+                skipped += 1
+                continue
+
+            weight_entries = (
+                db.query(WeightEntry)
+                .filter(WeightEntry.user_id == user.id, WeightEntry.timestamp >= period_start, WeightEntry.timestamp < period_end)
+                .all()
+            )
+
+            plan_sessions = []
+            active_plan = (
+                db.query(WorkoutPlan)
+                .filter(WorkoutPlan.user_id == user.id, WorkoutPlan.is_active == 1)
+                .first()
+            )
+            if active_plan:
+                plan_sessions = db.query(PlanSession).filter(PlanSession.plan_id == active_plan.id).all()
+
+            period_date_strings = [(period_start + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(8)]
+            health_metrics = (
+                db.query(HealthMetric)
+                .filter(HealthMetric.user_id == user.id, HealthMetric.date.in_(period_date_strings))
+                .all()
+            )
+
+            current_goals = {
+                "calorie_goal": user.calorie_goal,
+                "protein_goal": user.protein_goal,
+                "carbs_goal": user.carbs_goal or 0,
+                "fat_goal": user.fat_goal or 0,
+            }
+
+            result = run_recalibration(user, food_logs, weight_entries, plan_sessions, current_goals, health_metrics=health_metrics)
+
+            # Persist
+            recal = ANIRecalibration(
+                user_id=user.id,
+                period_start=period_start,
+                period_end=period_end,
+                prev_calorie_goal=current_goals["calorie_goal"],
+                prev_protein_goal=current_goals["protein_goal"],
+                prev_carbs_goal=current_goals["carbs_goal"],
+                prev_fat_goal=current_goals["fat_goal"],
+                new_calorie_goal=result["new_goals"]["calorie_goal"],
+                new_protein_goal=result["new_goals"]["protein_goal"],
+                new_carbs_goal=result["new_goals"]["carbs_goal"],
+                new_fat_goal=result["new_goals"]["fat_goal"],
+                analysis_json=json.dumps(result["analysis"]),
+                reasoning=result["reasoning"],
+            )
+            db.add(recal)
+            db.flush()
+
+            for ins in result["insights"]:
+                insight = ANIInsight(
+                    user_id=user.id,
+                    recalibration_id=recal.id,
+                    insight_type=ins["type"],
+                    title=ins["title"],
+                    body=ins["body"],
+                )
+                db.add(insight)
+
+            db.commit()
+            recalibrated += 1
+
+        except Exception as e:
+            db.rollback()
+            print(f"[AUTO-RECAL] Error for user {user.id}: {e}", file=sys.stderr, flush=True)
+            errors += 1
+
+    return {
+        "status": "completed",
+        "processed": processed,
+        "recalibrated": recalibrated,
+        "skipped": skipped,
+        "errors": errors,
+    }
+
+
+# ============================================================
+# Premium Analytics Endpoints
+# ============================================================
+
+@app.get("/analytics/trends")
+@limiter.limit("30/minute")
+def analytics_trends(
+    request: Request,
+    weeks: int = Query(default=8, ge=1, le=52),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_premium_user),
+):
+    """Week-over-week calorie/macro averages."""
+    from collections import defaultdict
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    start = now - timedelta(weeks=weeks)
+
+    logs = (
+        db.query(FoodLog)
+        .filter(FoodLog.user_id == current_user.id, FoodLog.timestamp >= start, FoodLog.timestamp < now)
+        .all()
+    )
+
+    # Group by week number (ISO week)
+    weekly: dict = defaultdict(lambda: {"days": defaultdict(lambda: {"cal": 0, "pro": 0, "carbs": 0, "fat": 0})})
+    for log in logs:
+        iso_year, iso_week, _ = log.timestamp.isocalendar()
+        week_key = f"{iso_year}-W{iso_week:02d}"
+        day_key = log.timestamp.strftime("%Y-%m-%d")
+        weekly[week_key]["days"][day_key]["cal"] += log.calories or 0
+        weekly[week_key]["days"][day_key]["pro"] += log.protein or 0
+        weekly[week_key]["days"][day_key]["carbs"] += log.carbs or 0
+        weekly[week_key]["days"][day_key]["fat"] += log.fat or 0
+
+    result = []
+    for week_key in sorted(weekly.keys()):
+        days = weekly[week_key]["days"]
+        n = max(len(days), 1)
+        result.append({
+            "week": week_key,
+            "days_logged": len(days),
+            "avg_calories": round(sum(d["cal"] for d in days.values()) / n),
+            "avg_protein": round(sum(d["pro"] for d in days.values()) / n),
+            "avg_carbs": round(sum(d["carbs"] for d in days.values()) / n),
+            "avg_fat": round(sum(d["fat"] for d in days.values()) / n),
+        })
+
+    return {"trends": result}
+
+
+@app.get("/analytics/consistency")
+@limiter.limit("30/minute")
+def analytics_consistency(
+    request: Request,
+    days: int = Query(default=30, ge=7, le=90),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_premium_user),
+):
+    """Consistency score 0-100: 70% macro accuracy + 30% logging rate."""
+    from collections import defaultdict
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    start = now - timedelta(days=days)
+
+    logs = (
+        db.query(FoodLog)
+        .filter(FoodLog.user_id == current_user.id, FoodLog.timestamp >= start, FoodLog.timestamp < now)
+        .all()
+    )
+
+    # Daily aggregates
+    daily: dict = defaultdict(lambda: {"cal": 0, "pro": 0, "carbs": 0, "fat": 0})
+    for log in logs:
+        day_key = log.timestamp.strftime("%Y-%m-%d")
+        daily[day_key]["cal"] += log.calories or 0
+        daily[day_key]["pro"] += log.protein or 0
+        daily[day_key]["carbs"] += log.carbs or 0
+        daily[day_key]["fat"] += log.fat or 0
+
+    days_logged = len(daily)
+    logging_rate = min(1.0, days_logged / days)
+
+    # Effective goals (ANI or base)
+    cal_goal = current_user.calorie_goal or 2000
+    pro_goal = current_user.protein_goal or 150
+    latest_recal = (
+        db.query(ANIRecalibration)
+        .filter(ANIRecalibration.user_id == current_user.id)
+        .order_by(ANIRecalibration.created_at.desc())
+        .first()
+    )
+    if latest_recal:
+        cal_goal = latest_recal.new_calorie_goal
+        pro_goal = latest_recal.new_protein_goal
+
+    # Macro accuracy: how close each logged day is to goals
+    accuracy_scores = []
+    for day_data in daily.values():
+        cal_dev = abs(day_data["cal"] - cal_goal) / max(cal_goal, 1)
+        pro_dev = abs(day_data["pro"] - pro_goal) / max(pro_goal, 1)
+        day_accuracy = max(0, 1 - (cal_dev * 0.6 + pro_dev * 0.4))
+        accuracy_scores.append(day_accuracy)
+
+    avg_accuracy = sum(accuracy_scores) / max(len(accuracy_scores), 1)
+
+    score = round((avg_accuracy * 0.70 + logging_rate * 0.30) * 100)
+
+    return {
+        "score": score,
+        "logging_rate": round(logging_rate * 100),
+        "macro_accuracy": round(avg_accuracy * 100),
+        "days_logged": days_logged,
+        "days_total": days,
+    }
+
+
+@app.get("/analytics/streaks")
+@limiter.limit("30/minute")
+def analytics_streaks(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_premium_user),
+):
+    """Current streak, longest streak, break analysis."""
+    from collections import Counter
+
+    logs = (
+        db.query(FoodLog)
+        .filter(FoodLog.user_id == current_user.id)
+        .order_by(FoodLog.timestamp.asc())
+        .all()
+    )
+
+    logged_dates = sorted(set(log.timestamp.strftime("%Y-%m-%d") for log in logs))
+
+    if not logged_dates:
+        return {"current_streak": 0, "longest_streak": 0, "most_common_break_day": None}
+
+    # Walk consecutive days
+    date_set = set(logged_dates)
+    longest = 0
+    current = 0
+    streak_start = None
+
+    # Find all streaks
+    from datetime import date as date_type
+    all_dates = [datetime.strptime(d, "%Y-%m-%d").date() for d in logged_dates]
+
+    streaks = []
+    s_start = all_dates[0]
+    s_len = 1
+
+    for i in range(1, len(all_dates)):
+        if (all_dates[i] - all_dates[i - 1]).days == 1:
+            s_len += 1
+        else:
+            streaks.append((s_start, s_len))
+            s_start = all_dates[i]
+            s_len = 1
+    streaks.append((s_start, s_len))
+
+    longest = max(s[1] for s in streaks)
+
+    # Current streak: check from today backwards
+    today = datetime.now(timezone.utc).replace(tzinfo=None).date()
+    current_streak = 0
+    check = today
+    while check.strftime("%Y-%m-%d") in date_set:
+        current_streak += 1
+        check -= timedelta(days=1)
+
+    # Most common break day (day of week when logging stopped)
+    break_days = []
+    for i in range(1, len(all_dates)):
+        gap = (all_dates[i] - all_dates[i - 1]).days
+        if gap > 1:
+            # The first missed day
+            missed = all_dates[i - 1] + timedelta(days=1)
+            break_days.append(missed.strftime("%A"))
+
+    most_common_break_day = Counter(break_days).most_common(1)[0][0] if break_days else None
+
+    return {
+        "current_streak": current_streak,
+        "longest_streak": longest,
+        "most_common_break_day": most_common_break_day,
+        "total_days_logged": len(logged_dates),
+    }
+
+
+@app.get("/analytics/correlations")
+@limiter.limit("30/minute")
+def analytics_correlations(
+    request: Request,
+    days: int = Query(default=30, ge=7, le=90),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_premium_user),
+):
+    """Protein/calorie patterns on workout vs rest days."""
+    from collections import defaultdict
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    start = now - timedelta(days=days)
+
+    # Get food logs
+    logs = (
+        db.query(FoodLog)
+        .filter(FoodLog.user_id == current_user.id, FoodLog.timestamp >= start, FoodLog.timestamp < now)
+        .all()
+    )
+
+    daily: dict = defaultdict(lambda: {"cal": 0, "pro": 0, "carbs": 0, "fat": 0})
+    for log in logs:
+        day_key = log.timestamp.strftime("%Y-%m-%d")
+        daily[day_key]["cal"] += log.calories or 0
+        daily[day_key]["pro"] += log.protein or 0
+        daily[day_key]["carbs"] += log.carbs or 0
+        daily[day_key]["fat"] += log.fat or 0
+
+    # Get workout/session completion dates
+    workout_dates = set()
+
+    # From logged workouts
+    workouts = (
+        db.query(Workout)
+        .filter(Workout.user_id == current_user.id, Workout.timestamp >= start, Workout.timestamp < now)
+        .all()
+    )
+    for w in workouts:
+        workout_dates.add(w.timestamp.strftime("%Y-%m-%d"))
+
+    # From completed plan sessions
+    active_plan = (
+        db.query(WorkoutPlan)
+        .filter(WorkoutPlan.user_id == current_user.id, WorkoutPlan.is_active == 1)
+        .first()
+    )
+    if active_plan:
+        completed_sessions = (
+            db.query(PlanSession)
+            .filter(
+                PlanSession.plan_id == active_plan.id,
+                PlanSession.is_completed == 1,
+                PlanSession.completed_at >= start,
+                PlanSession.completed_at < now,
+            )
+            .all()
+        )
+        for s in completed_sessions:
+            if s.completed_at:
+                workout_dates.add(s.completed_at.strftime("%Y-%m-%d"))
+
+    # Split nutrition by workout vs rest
+    workout_day_nutrition = []
+    rest_day_nutrition = []
+    for day_key, data in daily.items():
+        if day_key in workout_dates:
+            workout_day_nutrition.append(data)
+        else:
+            rest_day_nutrition.append(data)
+
+    def avg_of(items, key):
+        if not items:
+            return 0
+        return round(sum(d[key] for d in items) / len(items))
+
+    workout_avg = {
+        "calories": avg_of(workout_day_nutrition, "cal"),
+        "protein": avg_of(workout_day_nutrition, "pro"),
+        "carbs": avg_of(workout_day_nutrition, "carbs"),
+        "fat": avg_of(workout_day_nutrition, "fat"),
+        "days": len(workout_day_nutrition),
+    }
+    rest_avg = {
+        "calories": avg_of(rest_day_nutrition, "cal"),
+        "protein": avg_of(rest_day_nutrition, "pro"),
+        "carbs": avg_of(rest_day_nutrition, "carbs"),
+        "fat": avg_of(rest_day_nutrition, "fat"),
+        "days": len(rest_day_nutrition),
+    }
+
+    insights = []
+    if workout_avg["days"] > 0 and rest_avg["days"] > 0:
+        cal_diff = workout_avg["calories"] - rest_avg["calories"]
+        pro_diff = workout_avg["protein"] - rest_avg["protein"]
+        if cal_diff > 200:
+            insights.append(f"You eat ~{cal_diff} more calories on workout days - good fueling!")
+        elif cal_diff < -100:
+            insights.append(f"You eat ~{abs(cal_diff)} fewer calories on workout days - consider fueling workouts better.")
+        if pro_diff < -10:
+            insights.append(f"Protein is ~{abs(pro_diff)}g lower on workout days. Try adding a post-workout protein source.")
+
+    return {
+        "workout_days": workout_avg,
+        "rest_days": rest_avg,
+        "insights": insights,
+    }
+
+
+@app.get("/analytics/projections")
+@limiter.limit("30/minute")
+def analytics_projections(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_premium_user),
+):
+    """Body composition projections at 4/8/12 weeks."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    start = now - timedelta(days=30)
+
+    weight_entries = (
+        db.query(WeightEntry)
+        .filter(WeightEntry.user_id == current_user.id, WeightEntry.timestamp >= start)
+        .order_by(WeightEntry.timestamp.asc())
+        .all()
+    )
+
+    if len(weight_entries) < 2:
+        return {"projections": None, "reason": "Need at least 2 weight entries in the last 30 days."}
+
+    # Linear trend: weekly rate
+    first = weight_entries[0]
+    last = weight_entries[-1]
+    days_between = max((last.timestamp - first.timestamp).days, 1)
+    weekly_rate = (last.weight_lbs - first.weight_lbs) / (days_between / 7)
+    current_weight = last.weight_lbs
+
+    # Average daily expenditure from health metrics
+    date_strings = [(start + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(31)]
+    health_metrics = (
+        db.query(HealthMetric)
+        .filter(HealthMetric.user_id == current_user.id, HealthMetric.date.in_(date_strings))
+        .all()
+    )
+    expenditure_values = [m.total_expenditure for m in health_metrics if m.total_expenditure is not None]
+    avg_daily_expenditure = round(sum(expenditure_values) / len(expenditure_values)) if expenditure_values else None
+
+    projections = []
+    for weeks_out in [4, 8, 12]:
+        projected = round(current_weight + weekly_rate * weeks_out, 1)
+        projections.append({
+            "weeks": weeks_out,
+            "projected_weight": projected,
+        })
+
+    return {
+        "current_weight": current_weight,
+        "weekly_rate": round(weekly_rate, 2),
+        "avg_daily_expenditure": avg_daily_expenditure,
+        "projections": projections,
+        "data_points": len(weight_entries),
+    }
+
+
+@app.get("/analytics/meal-timing")
+@limiter.limit("30/minute")
+def analytics_meal_timing(
+    request: Request,
+    days: int = Query(default=30, ge=7, le=90),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_premium_user),
+):
+    """Calorie distribution by meal_type."""
+    from collections import defaultdict
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    start = now - timedelta(days=days)
+
+    logs = (
+        db.query(FoodLog)
+        .filter(FoodLog.user_id == current_user.id, FoodLog.timestamp >= start, FoodLog.timestamp < now)
+        .all()
+    )
+
+    meal_data: dict = defaultdict(lambda: {"total_cal": 0, "count": 0})
+    total_calories = 0
+    for log in logs:
+        meal = log.meal_type or "other"
+        cal = log.calories or 0
+        meal_data[meal]["total_cal"] += cal
+        meal_data[meal]["count"] += 1
+        total_calories += cal
+
+    # Count days logged
+    days_logged = len(set(log.timestamp.strftime("%Y-%m-%d") for log in logs))
+
+    result = []
+    for meal_type in ["breakfast", "lunch", "snack", "dinner", "other"]:
+        if meal_type in meal_data:
+            d = meal_data[meal_type]
+            avg = round(d["total_cal"] / max(days_logged, 1))
+            pct = round((d["total_cal"] / max(total_calories, 1)) * 100)
+            result.append({
+                "meal_type": meal_type,
+                "avg_calories": avg,
+                "percentage": pct,
+                "total_entries": d["count"],
+            })
+
+    return {"meal_timing": result, "days_logged": days_logged}
+
+
+@app.get("/analytics/compare-weeks")
+@limiter.limit("30/minute")
+def analytics_compare_weeks(
+    request: Request,
+    week_a_offset: int = Query(default=0, ge=0, le=52),
+    week_b_offset: int = Query(default=1, ge=0, le=52),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_premium_user),
+):
+    """Side-by-side week comparison."""
+    from collections import defaultdict
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    def get_week_stats(offset):
+        end = now - timedelta(days=offset * 7)
+        start = end - timedelta(days=7)
+        logs = (
+            db.query(FoodLog)
+            .filter(FoodLog.user_id == current_user.id, FoodLog.timestamp >= start, FoodLog.timestamp < end)
+            .all()
+        )
+        daily: dict = defaultdict(lambda: {"cal": 0, "pro": 0, "carbs": 0, "fat": 0})
+        for log in logs:
+            day_key = log.timestamp.strftime("%Y-%m-%d")
+            daily[day_key]["cal"] += log.calories or 0
+            daily[day_key]["pro"] += log.protein or 0
+            daily[day_key]["carbs"] += log.carbs or 0
+            daily[day_key]["fat"] += log.fat or 0
+
+        days_logged = len(daily)
+        n = max(days_logged, 1)
+        return {
+            "offset": offset,
+            "days_logged": days_logged,
+            "avg_calories": round(sum(d["cal"] for d in daily.values()) / n),
+            "avg_protein": round(sum(d["pro"] for d in daily.values()) / n),
+            "avg_carbs": round(sum(d["carbs"] for d in daily.values()) / n),
+            "avg_fat": round(sum(d["fat"] for d in daily.values()) / n),
+            "total_entries": len(logs) if logs else 0,
+        }
+
+    return {
+        "week_a": get_week_stats(week_a_offset),
+        "week_b": get_week_stats(week_b_offset),
     }

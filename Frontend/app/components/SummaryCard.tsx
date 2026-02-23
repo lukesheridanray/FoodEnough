@@ -5,9 +5,10 @@ import { Summary } from "../hooks/useFoodLogs";
 interface SummaryCardProps {
   summary: Summary | null;
   summaryLoading: boolean;
+  todayExpenditure?: number | null;
 }
 
-export default function SummaryCard({ summary, summaryLoading }: SummaryCardProps) {
+export default function SummaryCard({ summary, summaryLoading, todayExpenditure }: SummaryCardProps) {
   // Resolve effective goals: prefer ANI targets when active
   const effectiveCalGoal = (summary?.ani_active && summary?.ani_calorie_goal)
     ? summary.ani_calorie_goal : summary?.calorie_goal ?? null;
@@ -63,6 +64,14 @@ export default function SummaryCard({ summary, summaryLoading }: SummaryCardProp
                   {summary.latest_weight_lbs ? `${summary.latest_weight_lbs} lb` : "\u2014"}
                 </span>
               </div>
+              {todayExpenditure != null && todayExpenditure > 0 && (
+                <div className="text-xs">
+                  <span className="text-gray-400">Burn </span>
+                  <span className="font-semibold text-orange-600">
+                    {Math.round(todayExpenditure)} kcal
+                  </span>
+                </div>
+              )}
               <div className="text-xs">
                 <span className="text-gray-400">Workout </span>
                 <span className="font-semibold text-gray-700 max-w-[100px] inline-block truncate align-bottom">

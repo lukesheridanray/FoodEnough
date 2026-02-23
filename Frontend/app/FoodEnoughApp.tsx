@@ -9,7 +9,9 @@ import TextInputTab from "./components/TextInputTab";
 import PhotoInputTab from "./components/PhotoInputTab";
 import ManualInputTab from "./components/ManualInputTab";
 import LogList from "./components/LogList";
+import ActivityInput from "./components/ActivityInput";
 import { useFoodLogs, BarcodeResult } from "./hooks/useFoodLogs";
+import { useHealthMetrics } from "./hooks/useHealthMetrics";
 import { apiFetch, UnauthorizedError } from "../lib/api";
 import { getTzOffsetMinutes } from "../lib/auth";
 
@@ -40,6 +42,8 @@ export default function FoodEnoughApp() {
     handleLogout,
     handleUnauthorized,
   } = useFoodLogs();
+
+  const health = useHealthMetrics();
 
   const [inputTab, setInputTab] = useState<"text" | "photo" | "barcode" | "manual">("text");
   const [barcodeScannerOpen, setBarcodeScannerOpen] = useState(false);
@@ -170,7 +174,16 @@ export default function FoodEnoughApp() {
         </div>
       </header>
 
-      <SummaryCard summary={summary} summaryLoading={summaryLoading} />
+      <SummaryCard summary={summary} summaryLoading={summaryLoading} todayExpenditure={health.todayMetric?.total_expenditure} />
+
+      <ActivityInput
+        todayMetric={health.todayMetric}
+        loading={health.loading}
+        saving={health.saving}
+        saveError={health.saveError}
+        saveSuccess={health.saveSuccess}
+        onSave={health.saveDaily}
+      />
 
       {/* ANI progress nudge */}
       {summary && summary.calorie_goal && !summary.ani_active && summary.ani_days_logged_7d != null && summary.ani_days_logged_7d > 0 && (
