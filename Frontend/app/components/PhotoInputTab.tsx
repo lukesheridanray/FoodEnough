@@ -80,7 +80,7 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          input_text: `\ud83d\udcf7 ${imageAnalysis.description}`,
+          input_text: imageAnalysis.description,
           calories: imageAnalysis.total.calories,
           protein: imageAnalysis.total.protein,
           carbs: imageAnalysis.total.carbs,

@@ -112,7 +112,7 @@ export default function FoodEnoughApp() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          input_text: `\ud83d\udd0d ${barcodeResult.description}`,
+          input_text: barcodeResult.description,
           calories: barcodeResult.total.calories,
           protein: barcodeResult.total.protein,
           carbs: barcodeResult.total.carbs,
@@ -177,7 +177,7 @@ export default function FoodEnoughApp() {
                 onClick={() => handleQuickAdd(fav)}
                 className="flex-shrink-0 bg-white border border-green-200 rounded-full px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-50 transition-colors shadow-sm"
               >
-                {fav.input_text.replace(/^[\ud83d\udcf7\ud83d\udd0d\u270f\ufe0f] ?/, "")} <span className="text-gray-400 ml-1">{Math.round(fav.avg_calories)} kcal</span>
+                {fav.input_text} <span className="text-gray-400 ml-1">{Math.round(fav.avg_calories)} kcal</span>
               </button>
             ))}
           </div>
@@ -257,7 +257,7 @@ export default function FoodEnoughApp() {
               <div className="bg-white rounded-2xl p-3 shadow-sm space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-semibold text-gray-700 flex-1 mr-2">
-                    {"\ud83d\udd0d"} {barcodeResult.description}
+                    {barcodeResult.description}
                   </p>
                   <button
                     onClick={clearBarcode}
