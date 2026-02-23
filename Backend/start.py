@@ -1,49 +1,51 @@
-"""Startup script: runs Alembic migrations safely, then starts uvicorn."""
-import subprocess
+"""Startup script: ensures DB columns exist, then starts uvicorn."""
 import sys
 import os
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, inspect
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./foodenough.db")
 
-def stamp_if_needed():
-    """If tables exist but alembic_version doesn't, stamp to 001 so migrations 002+ can run."""
+
+def ensure_columns():
+    """Add any missing columns to existing tables (safe to run repeatedly)."""
     if DATABASE_URL.startswith("sqlite"):
-        return  # SQLite uses create_all, skip migrations
+        return  # SQLite uses create_all in main.py
 
     engine = create_engine(DATABASE_URL)
     with engine.connect() as conn:
-        # Check if alembic_version table exists
-        result = conn.execute(text(
-            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'alembic_version')"
-        ))
-        has_alembic = result.scalar()
+        insp = inspect(engine)
 
-        if not has_alembic:
-            # Tables exist from create_all but alembic hasn't been initialized
-            # Check if users table exists (proof that create_all ran)
-            result = conn.execute(text(
-                "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'users')"
-            ))
-            has_users = result.scalar()
+        # Check users table columns
+        if insp.has_table("users"):
+            user_cols = {c["name"] for c in insp.get_columns("users")}
 
-            if has_users:
-                print("[STARTUP] Tables exist but no alembic_version. Stamping to 001...", flush=True)
-                subprocess.run([sys.executable, "-m", "alembic", "stamp", "001"], check=True)
-            else:
-                print("[STARTUP] Fresh database, alembic will create everything.", flush=True)
+            if "is_verified" not in user_cols:
+                print("[STARTUP] Adding is_verified to users...", flush=True)
+                conn.execute(text("ALTER TABLE users ADD COLUMN is_verified INTEGER DEFAULT 0"))
+
+            if "verification_token" not in user_cols:
+                print("[STARTUP] Adding verification_token to users...", flush=True)
+                conn.execute(text("ALTER TABLE users ADD COLUMN verification_token VARCHAR"))
+
+            conn.commit()
+
+        # Check food_logs table columns
+        if insp.has_table("food_logs"):
+            log_cols = {c["name"] for c in insp.get_columns("food_logs")}
+
+            if "meal_type" not in log_cols:
+                print("[STARTUP] Adding meal_type to food_logs...", flush=True)
+                conn.execute(text("ALTER TABLE food_logs ADD COLUMN meal_type VARCHAR"))
+                conn.commit()
+
+        print("[STARTUP] Database columns verified.", flush=True)
 
     engine.dispose()
 
-if __name__ == "__main__":
-    stamp_if_needed()
 
-    # Run pending migrations
-    print("[STARTUP] Running alembic upgrade head...", flush=True)
-    result = subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"])
-    if result.returncode != 0:
-        print("[STARTUP] WARNING: alembic upgrade failed, continuing anyway...", flush=True)
+if __name__ == "__main__":
+    ensure_columns()
 
     # Start uvicorn
     port = os.getenv("PORT", "8000")
