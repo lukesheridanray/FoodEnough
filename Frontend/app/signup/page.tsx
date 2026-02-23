@@ -50,7 +50,8 @@ export default function SignupPage() {
     <div className="min-h-screen bg-gradient-to-b from-green-100 to-green-50 flex items-center justify-center px-5">
       <div className="bg-white rounded-2xl shadow-md p-8 w-full max-w-sm">
         <h1 className="text-2xl font-bold text-green-900 mb-1">🌿 FoodEnough</h1>
-        <p className="text-sm text-gray-500 mb-6">Create your account</p>
+        <p className="text-sm text-gray-600 mb-1">AI-powered food & fitness tracker</p>
+        <p className="text-sm text-gray-400 mb-6">Create your free account</p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="signup-email" className="text-sm text-gray-600 block mb-1">Email</label>
@@ -72,9 +73,11 @@ export default function SignupPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              minLength={8}
               autoComplete="new-password"
               className="w-full border border-green-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
             />
+            <p className="text-xs text-gray-400 mt-1">At least 8 characters</p>
           </div>
           <div>
             <label htmlFor="signup-confirm" className="text-sm text-gray-600 block mb-1">Confirm Password</label>

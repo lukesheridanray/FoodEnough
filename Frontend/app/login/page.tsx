@@ -41,7 +41,8 @@ export default function LoginPage() {
     <div className="min-h-screen bg-gradient-to-b from-green-100 to-green-50 flex items-center justify-center px-5">
       <div className="bg-white rounded-2xl shadow-md p-8 w-full max-w-sm">
         <h1 className="text-2xl font-bold text-green-900 mb-1">🌿 FoodEnough</h1>
-        <p className="text-sm text-gray-500 mb-6">Log in to your account</p>
+        <p className="text-sm text-gray-600 mb-1">AI-powered food & fitness tracker</p>
+        <p className="text-sm text-gray-400 mb-6">Log in to your account</p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="login-email" className="text-sm text-gray-600 block mb-1">Email</label>

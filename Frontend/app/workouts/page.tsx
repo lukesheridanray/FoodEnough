@@ -9,7 +9,22 @@ import { useWorkouts } from "../hooks/useWorkouts";
 export default function WorkoutsPage() {
   const w = useWorkouts();
 
-  if (w.loading) return <div className="p-6 text-gray-500">Loading\u2026</div>;
+  if (w.loading) return (
+    <div className="min-h-screen bg-gradient-to-b from-green-100 to-green-50 pb-24">
+      <div style={{ height: 'max(24px, env(safe-area-inset-top))' }} />
+      <header className="px-5 py-3">
+        <div className="h-6 w-32 bg-gray-200 rounded animate-pulse" />
+      </header>
+      <section className="px-5 mt-6">
+        <div className="bg-white rounded-2xl shadow-sm p-5 animate-pulse">
+          <div className="h-4 w-40 bg-gray-200 rounded mb-3" />
+          <div className="h-12 w-full bg-gray-100 rounded-xl mb-3" />
+          <div className="h-12 w-full bg-gray-100 rounded-xl" />
+        </div>
+      </section>
+      <BottomNav />
+    </div>
+  );
 
   // -- QUIZ --
   if (w.quizMode) {

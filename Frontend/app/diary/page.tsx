@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getToken, removeToken, authHeaders } from "../../lib/auth";
-import { API_URL } from "../../lib/config";
+import { getToken } from "../../lib/auth";
+import { apiFetch, UnauthorizedError } from "../../lib/api";
 import BottomNav from "../components/BottomNav";
 import {
   BarChart,
@@ -78,12 +78,9 @@ export default function DiaryPage() {
     const fetchLogs = async () => {
       setLoading(true);
       try {
-        const res = await fetch(`${API_URL}/logs/week?offset_days=${weekOffset * 7}`, {
-          headers: authHeaders(),
-        });
+        const res = await apiFetch(`/logs/week?offset_days=${weekOffset * 7}`);
 
         if (!res.ok) {
-          if (res.status === 401) { removeToken(); router.push("/login"); return; }
           setError("Failed to load diary. Please try again.");
           return;
         }
@@ -93,7 +90,7 @@ export default function DiaryPage() {
         const totals: WeekTotal = { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, sugar: 0, sodium: 0 };
 
         for (const log of data.logs) {
-          const date = new Date(log.timestamp).toLocaleDateString();
+          const date = new Date(log.timestamp).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
           if (!grouped[date]) grouped[date] = [];
 
           const parsed =
@@ -142,7 +139,8 @@ export default function DiaryPage() {
 
         setDailyLogs(output);
         setWeekTotal(totals);
-      } catch {
+      } catch (err) {
+        if (err instanceof UnauthorizedError) { router.push("/login"); return; }
         setError("Failed to load diary. Please try again.");
       } finally {
         setLoading(false);

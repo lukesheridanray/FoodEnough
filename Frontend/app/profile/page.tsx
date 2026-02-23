@@ -13,7 +13,24 @@ export default function ProfilePage() {
   const router = useRouter();
   const p = useProfile();
 
-  if (p.loading) return <div className="p-6 text-gray-500">Loading{"\u2026"}</div>;
+  if (p.loading) return (
+    <div className="min-h-screen bg-gradient-to-b from-green-100 to-green-50 pb-24">
+      <div style={{ height: 'max(24px, env(safe-area-inset-top))' }} />
+      <header className="px-5 py-3">
+        <div className="h-6 w-40 bg-gray-200 rounded animate-pulse" />
+        <div className="h-4 w-28 bg-gray-200 rounded animate-pulse mt-2" />
+      </header>
+      <section className="px-5 mt-6">
+        <div className="bg-white rounded-2xl shadow-sm p-5 animate-pulse">
+          <div className="h-4 w-32 bg-gray-200 rounded mb-4" />
+          <div className="grid grid-cols-2 gap-2">
+            {[1,2,3,4].map(i => <div key={i} className="h-16 bg-gray-100 rounded-xl" />)}
+          </div>
+        </div>
+      </section>
+      <BottomNav />
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-green-100 to-green-50 pb-24">

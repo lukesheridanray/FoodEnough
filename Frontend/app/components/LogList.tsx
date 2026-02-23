@@ -14,6 +14,7 @@ interface LogListProps {
   editError: string;
   setEditError: (err: string) => void;
   deleteError?: string;
+  exportError?: string;
   onEditSave: (logId: number) => void;
   onDelete: (logId: number) => void;
   onExport: () => void;
@@ -127,6 +128,7 @@ function LogCard({
                   onClick={() => { setEditingId(log.id); setEditText(log.input_text); setDeleteConfirmId(null); }}
                   className="text-gray-400 hover:text-gray-600 transition-colors p-1"
                   title="Edit"
+                  aria-label="Edit log"
                 >
                   <Pencil className="w-4 h-4" />
                 </button>
@@ -134,6 +136,7 @@ function LogCard({
                   onClick={() => setDeleteConfirmId(log.id)}
                   className="text-red-400 hover:text-red-600 text-xl transition-colors p-1"
                   title="Delete"
+                  aria-label="Delete log"
                 >
                   {"\u00d7"}
                 </button>
@@ -177,6 +180,7 @@ export default function LogList({
   editError,
   setEditError,
   deleteError,
+  exportError,
   onEditSave,
   onDelete,
   onExport,
@@ -192,14 +196,18 @@ export default function LogList({
         <h2 className="text-lg font-bold text-green-900">My Logs</h2>
         <button
           onClick={onExport}
+          aria-label="Export food logs as CSV"
           className="flex items-center gap-1 text-sm font-medium text-white bg-gradient-to-r from-green-600 to-green-500 px-3 py-1.5 rounded-lg shadow-md hover:shadow-lg hover:scale-[1.03] active:scale-[0.98] transition-all"
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
           </svg>
           Export CSV
         </button>
       </div>
+      {exportError && (
+        <p className="text-red-500 text-sm mb-2" role="alert">{exportError}</p>
+      )}
 
       {logs.length === 0 ? (
         <div className="py-10 text-center">
