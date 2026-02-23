@@ -98,11 +98,13 @@ class User(Base):
     goal_type = Column(String, nullable=True)        # 'lose', 'maintain', 'gain'
     is_verified = Column(Integer, default=0)           # 0 = unverified, 1 = verified
     verification_token = Column(String, nullable=True)
+    is_premium = Column(Integer, default=1)              # 0 = free, 1 = premium (default true for testing)
     logs = relationship("FoodLog", back_populates="user")
     workouts = relationship("Workout", back_populates="user")
     weight_entries = relationship("WeightEntry", back_populates="user")
     fitness_profile = relationship("FitnessProfile", back_populates="user", uselist=False)
     workout_plans = relationship("WorkoutPlan", back_populates="user")
+    ani_recalibrations = relationship("ANIRecalibration", back_populates="user")
 
 
 class FoodLog(Base):
@@ -197,6 +199,39 @@ class PasswordResetToken(Base):
     token = Column(String, unique=True, nullable=False)
     expires_at = Column(DateTime, nullable=False)
     used = Column(Integer, default=0)  # 0 = unused, 1 = used
+
+
+class ANIRecalibration(Base):
+    __tablename__ = "ani_recalibrations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    period_start = Column(DateTime, nullable=False)
+    period_end = Column(DateTime, nullable=False)
+    prev_calorie_goal = Column(Integer, nullable=False)
+    prev_protein_goal = Column(Integer, nullable=False)
+    prev_carbs_goal = Column(Integer, nullable=False)
+    prev_fat_goal = Column(Integer, nullable=False)
+    new_calorie_goal = Column(Integer, nullable=False)
+    new_protein_goal = Column(Integer, nullable=False)
+    new_carbs_goal = Column(Integer, nullable=False)
+    new_fat_goal = Column(Integer, nullable=False)
+    analysis_json = Column(Text, nullable=True)
+    reasoning = Column(Text, nullable=False)
+    user = relationship("User", back_populates="ani_recalibrations")
+
+
+class ANIInsight(Base):
+    __tablename__ = "ani_insights"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    recalibration_id = Column(Integer, ForeignKey("ani_recalibrations.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    insight_type = Column(String, nullable=False)  # pattern, achievement, warning, tip
+    title = Column(String, nullable=False)
+    body = Column(Text, nullable=False)
 
 
 if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
@@ -435,6 +470,274 @@ def calculate_nutrition_goals(
 
 
 # ============================================================
+# ANI Recalibration Engine (pure math, no AI API)
+# ============================================================
+def run_recalibration(
+    user,
+    food_logs: list,
+    weight_entries: list,
+    plan_sessions: list,
+    current_goals: dict,
+) -> dict:
+    """
+    Analyze 7 days of data and return adjusted goals.
+    Returns: { new_goals: dict, analysis: dict, reasoning: str, insights: list }
+    """
+    from collections import defaultdict
+
+    prev_cal = current_goals["calorie_goal"]
+    prev_pro = current_goals["protein_goal"]
+    prev_carbs = current_goals["carbs_goal"]
+    prev_fat = current_goals["fat_goal"]
+    goal_type = user.goal_type or "maintain"
+
+    # 1. Aggregate daily averages from food logs
+    daily: dict = defaultdict(lambda: {"cal": 0.0, "pro": 0.0, "carbs": 0.0, "fat": 0.0})
+    for log in food_logs:
+        day_key = log.timestamp.strftime("%Y-%m-%d")
+        daily[day_key]["cal"] += log.calories or 0
+        daily[day_key]["pro"] += log.protein or 0
+        daily[day_key]["carbs"] += log.carbs or 0
+        daily[day_key]["fat"] += log.fat or 0
+
+    days_logged = len(daily)
+    avg_cal = sum(d["cal"] for d in daily.values()) / max(days_logged, 1)
+    avg_pro = sum(d["pro"] for d in daily.values()) / max(days_logged, 1)
+
+    # Weekend vs weekday protein split
+    weekend_days = []
+    weekday_days = []
+    for log in food_logs:
+        dow = log.timestamp.weekday()  # 0=Mon, 5=Sat, 6=Sun
+        if dow >= 5:
+            weekend_days.append(log)
+        else:
+            weekday_days.append(log)
+
+    weekend_pro_total: dict = defaultdict(float)
+    weekday_pro_total: dict = defaultdict(float)
+    for log in weekend_days:
+        weekend_pro_total[log.timestamp.strftime("%Y-%m-%d")] += log.protein or 0
+    for log in weekday_days:
+        weekday_pro_total[log.timestamp.strftime("%Y-%m-%d")] += log.protein or 0
+
+    weekend_pro_avg = sum(weekend_pro_total.values()) / max(len(weekend_pro_total), 1)
+    weekday_pro_avg = sum(weekday_pro_total.values()) / max(len(weekday_pro_total), 1)
+
+    # 2. Compute weight trend
+    weight_delta = None
+    if len(weight_entries) >= 2:
+        sorted_weights = sorted(weight_entries, key=lambda w: w.timestamp)
+        weight_delta = sorted_weights[-1].weight_lbs - sorted_weights[0].weight_lbs
+
+    # 3. Compute workout adherence
+    total_planned = len(plan_sessions)
+    completed_sessions = sum(1 for s in plan_sessions if s.is_completed)
+    workout_adherence = completed_sessions / max(total_planned, 1)
+
+    # 4. Detect patterns
+    patterns = []
+    weekend_protein_dip = (
+        weekday_pro_avg > 0
+        and len(weekend_pro_total) > 0
+        and weekend_pro_avg < weekday_pro_avg * 0.75
+    )
+    if weekend_protein_dip:
+        patterns.append("weekend_protein_dip")
+
+    consistent_under = prev_cal and avg_cal < prev_cal * 0.80 and days_logged >= 5
+    consistent_over = prev_cal and avg_cal > prev_cal * 1.15 and days_logged >= 5
+    if consistent_under:
+        patterns.append("consistent_under_eating")
+    if consistent_over:
+        patterns.append("consistent_over_eating")
+
+    # 5. Apply adjustment rules
+    new_cal = float(prev_cal)
+    new_pro = float(prev_pro)
+    reasoning_parts = []
+    insights = []
+
+    if weight_delta is not None:
+        if goal_type == "lose":
+            if weight_delta < -3:
+                # Losing too fast
+                new_cal *= 1.05
+                reasoning_parts.append(
+                    f"You lost {abs(round(weight_delta, 1))} lbs this week, which is faster than recommended. "
+                    f"Raising your calorie target by 5% to slow the rate of loss and preserve muscle."
+                )
+                insights.append({
+                    "type": "warning",
+                    "title": "Rapid weight loss detected",
+                    "body": f"You lost {abs(round(weight_delta, 1))} lbs this week. A safe rate is 0.5-2 lbs/week. "
+                            f"Your calorie target has been increased slightly to protect muscle mass.",
+                })
+            elif -2 <= weight_delta <= -0.5:
+                reasoning_parts.append(
+                    f"You lost {abs(round(weight_delta, 1))} lbs this week — right on track for healthy fat loss. "
+                    f"Keeping your targets steady."
+                )
+                insights.append({
+                    "type": "achievement",
+                    "title": "On track",
+                    "body": f"Your {abs(round(weight_delta, 1))} lb loss this week is in the ideal range. Keep it up!",
+                })
+            elif weight_delta > 0:
+                reasoning_parts.append(
+                    f"Weight went up {round(weight_delta, 1)} lbs while in a cut. This could be water fluctuation. "
+                    f"Holding targets steady — monitor next week."
+                )
+        elif goal_type == "gain":
+            if weight_delta is not None and weight_delta < 0.25:
+                new_cal *= 1.05
+                reasoning_parts.append(
+                    f"Weight change was only {round(weight_delta, 1)} lbs — below the gain target. "
+                    f"Bumping calories by 5% to support your surplus."
+                )
+            elif 0.25 <= (weight_delta or 0) <= 1.0:
+                reasoning_parts.append(
+                    f"You gained {round(weight_delta, 1)} lbs — solid lean-bulk progress. Holding targets steady."
+                )
+                insights.append({
+                    "type": "achievement",
+                    "title": "Gaining on pace",
+                    "body": f"Your {round(weight_delta, 1)} lb gain is in the ideal range for lean muscle building.",
+                })
+        else:  # maintain
+            if weight_delta is not None and abs(weight_delta) < 0.5:
+                reasoning_parts.append(
+                    f"Weight stable at {round(weight_delta, 1)} lbs change — maintenance is on point."
+                )
+                insights.append({
+                    "type": "achievement",
+                    "title": "Maintenance locked in",
+                    "body": "Your weight is holding steady. Your current targets are working well.",
+                })
+            elif weight_delta is not None and weight_delta < -1:
+                new_cal *= 1.07
+                reasoning_parts.append(
+                    f"You lost {abs(round(weight_delta, 1))} lbs while maintaining — raising calories 7% to stabilize."
+                )
+            elif weight_delta is not None and weight_delta > 1:
+                new_cal *= 0.95
+                reasoning_parts.append(
+                    f"You gained {round(weight_delta, 1)} lbs while maintaining — reducing calories 5% to stabilize."
+                )
+    else:
+        reasoning_parts.append(
+            "Not enough weight data this week to assess trend. "
+            "Log your weight regularly for better recommendations."
+        )
+        insights.append({
+            "type": "tip",
+            "title": "Log your weight",
+            "body": "Weighing in at least twice a week helps ANI make more accurate adjustments.",
+        })
+
+    # Weekend protein dip
+    if weekend_protein_dip:
+        new_pro *= 1.05
+        reasoning_parts.append(
+            f"Your weekend protein averaged {round(weekend_pro_avg)}g vs {round(weekday_pro_avg)}g on weekdays. "
+            f"Bumping protein target 5% to encourage consistency."
+        )
+        insights.append({
+            "type": "pattern",
+            "title": "Weekend protein dip",
+            "body": f"Protein drops on weekends ({round(weekend_pro_avg)}g avg vs {round(weekday_pro_avg)}g weekday). "
+                    f"Try prepping high-protein snacks for the weekend.",
+        })
+
+    # Workout adherence
+    if total_planned > 0 and workout_adherence < 0.5:
+        new_cal *= 0.97
+        reasoning_parts.append(
+            f"Workout adherence was {round(workout_adherence * 100)}% — reducing calories 3% since activity is lower than planned."
+        )
+        insights.append({
+            "type": "warning",
+            "title": "Low workout adherence",
+            "body": f"You completed {completed_sessions} of {total_planned} planned sessions. "
+                    f"Calorie target adjusted down to match actual activity level.",
+        })
+    elif total_planned > 0 and workout_adherence >= 0.8:
+        insights.append({
+            "type": "achievement",
+            "title": "Strong workout consistency",
+            "body": f"You completed {completed_sessions} of {total_planned} sessions ({round(workout_adherence * 100)}%). Great discipline!",
+        })
+
+    # Consistent over-eating (non-lose goal)
+    if consistent_over and goal_type != "lose":
+        adjustment = min((avg_cal - prev_cal) / 2, prev_cal * 0.10)
+        new_cal += adjustment
+        reasoning_parts.append(
+            f"You've been consistently eating above your target (avg {round(avg_cal)} vs goal {prev_cal}). "
+            f"Raising target partway to better match reality."
+        )
+
+    # 6. Enforce 10% cap on all adjustments, floor at 1200 kcal
+    max_cal_change = prev_cal * 0.10
+    new_cal = max(1200, min(new_cal, prev_cal + max_cal_change))
+    new_cal = max(new_cal, prev_cal - max_cal_change)
+    new_cal = round(new_cal)
+
+    max_pro_change = prev_pro * 0.10
+    new_pro = max(round(prev_pro - max_pro_change), min(round(new_pro), round(prev_pro + max_pro_change)))
+
+    # 7. Recompute carbs/fat from adjusted calories
+    new_fat = round((new_cal * 0.30) / 9)
+    max_fat_change = prev_fat * 0.10
+    new_fat = max(round(prev_fat - max_fat_change), min(new_fat, round(prev_fat + max_fat_change)))
+
+    pro_cal = new_pro * 4
+    fat_cal = new_fat * 9
+    remaining_cal = max(0, new_cal - pro_cal - fat_cal)
+    new_carbs = round(remaining_cal / 4)
+    max_carbs_change = prev_carbs * 0.10
+    new_carbs = max(round(prev_carbs - max_carbs_change), min(new_carbs, round(prev_carbs + max_carbs_change)))
+
+    # Logging consistency insight
+    if days_logged >= 6:
+        insights.append({
+            "type": "achievement",
+            "title": "Consistent logging",
+            "body": f"You logged {days_logged} out of 7 days. Consistent tracking is the foundation of progress.",
+        })
+    elif days_logged >= 5:
+        insights.append({
+            "type": "tip",
+            "title": "Almost full coverage",
+            "body": f"You logged {days_logged} of 7 days. Try to log every day for the most accurate recalibration.",
+        })
+
+    if not reasoning_parts:
+        reasoning_parts.append("Your targets are on track. No changes needed this week.")
+
+    analysis = {
+        "days_logged": days_logged,
+        "avg_calories": round(avg_cal),
+        "avg_protein": round(avg_pro),
+        "weight_delta": round(weight_delta, 1) if weight_delta is not None else None,
+        "workout_adherence": round(workout_adherence * 100),
+        "patterns": patterns,
+    }
+
+    return {
+        "new_goals": {
+            "calorie_goal": new_cal,
+            "protein_goal": new_pro,
+            "carbs_goal": new_carbs,
+            "fat_goal": new_fat,
+        },
+        "analysis": analysis,
+        "reasoning": " ".join(reasoning_parts),
+        "insights": insights,
+    }
+
+
+# ============================================================
 # Dependencies
 # ============================================================
 def get_db():
@@ -469,6 +772,14 @@ def get_current_user(
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
     return user
+
+
+def get_premium_user(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    if not current_user.is_premium:
+        raise HTTPException(status_code=403, detail="Premium subscription required")
+    return current_user
 
 
 # ============================================================
@@ -878,6 +1189,9 @@ def delete_account(
     email = current_user.email
 
     try:
+        # Delete ANI data first (insights FK to recalibrations)
+        db.query(ANIInsight).filter(ANIInsight.user_id == user_id).delete(synchronize_session=False)
+        db.query(ANIRecalibration).filter(ANIRecalibration.user_id == user_id).delete(synchronize_session=False)
         # Delete PlanSessions first (FK to workout_plans)
         plan_ids = [p.id for p in db.query(WorkoutPlan.id).filter(WorkoutPlan.user_id == user_id).all()]
         if plan_ids:
@@ -1541,6 +1855,7 @@ def get_profile(
         "activity_level": current_user.activity_level,
         "goal_type": current_user.goal_type,
         "is_verified": bool(current_user.is_verified),
+        "is_premium": bool(current_user.is_premium),
     }
 
 
@@ -1809,9 +2124,7 @@ def get_today_summary(
     sugar_today = sum(log.sugar or 0 for log in today_logs)
     sodium_today = sum(log.sodium or 0 for log in today_logs)
 
-    # Calories remaining vs goal
     calorie_goal = current_user.calorie_goal
-    calories_remaining = (calorie_goal - calories_today) if calorie_goal is not None else None
 
     # Latest weight entry
     latest_weight = (
@@ -1829,6 +2142,31 @@ def get_today_summary(
         .first()
     )
 
+    # ANI adaptive targets
+    ani_active = False
+    ani_calorie_goal = None
+    ani_protein_goal = None
+    ani_carbs_goal = None
+    ani_fat_goal = None
+
+    if current_user.is_premium:
+        latest_recal = (
+            db.query(ANIRecalibration)
+            .filter(ANIRecalibration.user_id == current_user.id)
+            .order_by(ANIRecalibration.created_at.desc())
+            .first()
+        )
+        if latest_recal:
+            ani_active = True
+            ani_calorie_goal = latest_recal.new_calorie_goal
+            ani_protein_goal = latest_recal.new_protein_goal
+            ani_carbs_goal = latest_recal.new_carbs_goal
+            ani_fat_goal = latest_recal.new_fat_goal
+
+    # Use ANI goal for calories_remaining if active
+    effective_calorie_goal = ani_calorie_goal if ani_active else calorie_goal
+    calories_remaining = (effective_calorie_goal - calories_today) if effective_calorie_goal is not None else None
+
     return {
         "calories_today": round(calories_today),
         "calorie_goal": calorie_goal,
@@ -1844,6 +2182,11 @@ def get_today_summary(
         "sodium_today": round(sodium_today),
         "latest_weight_lbs": latest_weight.weight_lbs if latest_weight else None,
         "latest_workout_name": latest_workout.name if latest_workout else None,
+        "ani_active": ani_active,
+        "ani_calorie_goal": ani_calorie_goal,
+        "ani_protein_goal": ani_protein_goal,
+        "ani_carbs_goal": ani_carbs_goal,
+        "ani_fat_goal": ani_fat_goal,
     }
 
 
@@ -2184,3 +2527,283 @@ def complete_plan_session(
     session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
     db.commit()
     return {"status": "completed"}
+
+
+# ============================================================
+# POST /ani/recalibrate  — run ANI recalibration
+# ============================================================
+@app.post("/ani/recalibrate")
+@limiter.limit("5/minute")
+def ani_recalibrate(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_premium_user),
+):
+    # Check user has goals set
+    if not current_user.calorie_goal or not current_user.protein_goal:
+        raise HTTPException(status_code=400, detail="Set up your nutrition goals first before running a recalibration.")
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    # Check cooldown: block if last recalibration < 6 days ago
+    last_recal = (
+        db.query(ANIRecalibration)
+        .filter(ANIRecalibration.user_id == current_user.id)
+        .order_by(ANIRecalibration.created_at.desc())
+        .first()
+    )
+    if last_recal:
+        days_since = (now - last_recal.created_at).days
+        if days_since < 6:
+            days_remaining = 6 - days_since
+            raise HTTPException(
+                status_code=400,
+                detail=f"Recalibration available in {days_remaining} day{'s' if days_remaining != 1 else ''}. "
+                       f"ANI needs at least 7 days of data between recalibrations.",
+            )
+
+    # Check minimum data: first log must be at least 7 days ago
+    first_log = (
+        db.query(FoodLog)
+        .filter(FoodLog.user_id == current_user.id)
+        .order_by(FoodLog.timestamp.asc())
+        .first()
+    )
+    if not first_log or (now - first_log.timestamp).days < 7:
+        raise HTTPException(
+            status_code=400,
+            detail="You need at least 7 days of food logging history to run your first recalibration.",
+        )
+
+    # Query last 7 days of data
+    period_end = now
+    period_start = now - timedelta(days=7)
+
+    food_logs = (
+        db.query(FoodLog)
+        .filter(
+            FoodLog.user_id == current_user.id,
+            FoodLog.timestamp >= period_start,
+            FoodLog.timestamp < period_end,
+        )
+        .all()
+    )
+
+    # Check minimum days logged
+    logged_days = len(set(log.timestamp.strftime("%Y-%m-%d") for log in food_logs))
+    if logged_days < 5:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only {logged_days} days logged in the last 7 days. ANI needs at least 5 days of data.",
+        )
+
+    weight_entries = (
+        db.query(WeightEntry)
+        .filter(
+            WeightEntry.user_id == current_user.id,
+            WeightEntry.timestamp >= period_start,
+            WeightEntry.timestamp < period_end,
+        )
+        .all()
+    )
+
+    # Get active plan sessions for the period
+    plan_sessions = []
+    active_plan = (
+        db.query(WorkoutPlan)
+        .filter(WorkoutPlan.user_id == current_user.id, WorkoutPlan.is_active == 1)
+        .first()
+    )
+    if active_plan:
+        plan_sessions = (
+            db.query(PlanSession)
+            .filter(PlanSession.plan_id == active_plan.id)
+            .all()
+        )
+
+    current_goals = {
+        "calorie_goal": current_user.calorie_goal,
+        "protein_goal": current_user.protein_goal,
+        "carbs_goal": current_user.carbs_goal or 0,
+        "fat_goal": current_user.fat_goal or 0,
+    }
+
+    result = run_recalibration(current_user, food_logs, weight_entries, plan_sessions, current_goals)
+
+    # Persist recalibration
+    recal = ANIRecalibration(
+        user_id=current_user.id,
+        period_start=period_start,
+        period_end=period_end,
+        prev_calorie_goal=prev_cal if (prev_cal := current_goals["calorie_goal"]) else 0,
+        prev_protein_goal=prev_pro if (prev_pro := current_goals["protein_goal"]) else 0,
+        prev_carbs_goal=current_goals["carbs_goal"],
+        prev_fat_goal=current_goals["fat_goal"],
+        new_calorie_goal=result["new_goals"]["calorie_goal"],
+        new_protein_goal=result["new_goals"]["protein_goal"],
+        new_carbs_goal=result["new_goals"]["carbs_goal"],
+        new_fat_goal=result["new_goals"]["fat_goal"],
+        analysis_json=json.dumps(result["analysis"]),
+        reasoning=result["reasoning"],
+    )
+    db.add(recal)
+    db.flush()
+
+    # Persist insights
+    for ins in result["insights"]:
+        insight = ANIInsight(
+            user_id=current_user.id,
+            recalibration_id=recal.id,
+            insight_type=ins["type"],
+            title=ins["title"],
+            body=ins["body"],
+        )
+        db.add(insight)
+
+    db.commit()
+    db.refresh(recal)
+
+    return {
+        "status": "success",
+        "recalibration": {
+            "id": recal.id,
+            "created_at": recal.created_at.isoformat() if recal.created_at else None,
+            "period_start": recal.period_start.isoformat(),
+            "period_end": recal.period_end.isoformat(),
+            "prev_goals": {
+                "calorie_goal": recal.prev_calorie_goal,
+                "protein_goal": recal.prev_protein_goal,
+                "carbs_goal": recal.prev_carbs_goal,
+                "fat_goal": recal.prev_fat_goal,
+            },
+            "new_goals": {
+                "calorie_goal": recal.new_calorie_goal,
+                "protein_goal": recal.new_protein_goal,
+                "carbs_goal": recal.new_carbs_goal,
+                "fat_goal": recal.new_fat_goal,
+            },
+            "reasoning": recal.reasoning,
+            "analysis": result["analysis"],
+        },
+        "insights": [
+            {
+                "id": i.id if hasattr(i, "id") else None,
+                "type": ins["type"],
+                "title": ins["title"],
+                "body": ins["body"],
+            }
+            for i, ins in zip(
+                db.query(ANIInsight).filter(ANIInsight.recalibration_id == recal.id).all(),
+                result["insights"],
+            )
+        ],
+    }
+
+
+# ============================================================
+# GET /ani/targets  — current ANI targets
+# ============================================================
+@app.get("/ani/targets")
+@limiter.limit("60/minute")
+def ani_targets(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_premium_user),
+):
+    latest = (
+        db.query(ANIRecalibration)
+        .filter(ANIRecalibration.user_id == current_user.id)
+        .order_by(ANIRecalibration.created_at.desc())
+        .first()
+    )
+    if not latest:
+        return {"ani_active": False, "days_until_next": 0}
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    days_since = (now - latest.created_at).days
+    days_until_next = max(0, 7 - days_since)
+
+    return {
+        "ani_active": True,
+        "calorie_goal": latest.new_calorie_goal,
+        "protein_goal": latest.new_protein_goal,
+        "carbs_goal": latest.new_carbs_goal,
+        "fat_goal": latest.new_fat_goal,
+        "reasoning": latest.reasoning,
+        "days_until_next": days_until_next,
+        "last_recalibrated": latest.created_at.isoformat() if latest.created_at else None,
+    }
+
+
+# ============================================================
+# GET /ani/history  — last 12 recalibrations
+# ============================================================
+@app.get("/ani/history")
+@limiter.limit("60/minute")
+def ani_history(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_premium_user),
+):
+    recals = (
+        db.query(ANIRecalibration)
+        .filter(ANIRecalibration.user_id == current_user.id)
+        .order_by(ANIRecalibration.created_at.desc())
+        .limit(12)
+        .all()
+    )
+    return {
+        "history": [
+            {
+                "id": r.id,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "period_start": r.period_start.isoformat(),
+                "period_end": r.period_end.isoformat(),
+                "prev_goals": {
+                    "calorie_goal": r.prev_calorie_goal,
+                    "protein_goal": r.prev_protein_goal,
+                    "carbs_goal": r.prev_carbs_goal,
+                    "fat_goal": r.prev_fat_goal,
+                },
+                "new_goals": {
+                    "calorie_goal": r.new_calorie_goal,
+                    "protein_goal": r.new_protein_goal,
+                    "carbs_goal": r.new_carbs_goal,
+                    "fat_goal": r.new_fat_goal,
+                },
+                "reasoning": r.reasoning,
+            }
+            for r in recals
+        ]
+    }
+
+
+# ============================================================
+# GET /ani/insights  — last 20 insights
+# ============================================================
+@app.get("/ani/insights")
+@limiter.limit("60/minute")
+def ani_insights(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_premium_user),
+):
+    insights = (
+        db.query(ANIInsight)
+        .filter(ANIInsight.user_id == current_user.id)
+        .order_by(ANIInsight.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    return {
+        "insights": [
+            {
+                "id": i.id,
+                "type": i.insight_type,
+                "title": i.title,
+                "body": i.body,
+                "created_at": i.created_at.isoformat() if i.created_at else None,
+            }
+            for i in insights
+        ]
+    }

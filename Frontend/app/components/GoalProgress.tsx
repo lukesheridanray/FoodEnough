@@ -7,6 +7,16 @@ interface GoalProgressProps {
 }
 
 export default function GoalProgress({ todaySummary, goalType }: GoalProgressProps) {
+  // Resolve effective goals: prefer ANI targets when active
+  const effectiveCalGoal = (todaySummary.ani_active && todaySummary.ani_calorie_goal)
+    ? todaySummary.ani_calorie_goal : todaySummary.calorie_goal;
+  const effectiveProGoal = (todaySummary.ani_active && todaySummary.ani_protein_goal)
+    ? todaySummary.ani_protein_goal : todaySummary.protein_goal;
+  const effectiveCarbsGoal = (todaySummary.ani_active && todaySummary.ani_carbs_goal)
+    ? todaySummary.ani_carbs_goal : todaySummary.carbs_goal;
+  const effectiveFatGoal = (todaySummary.ani_active && todaySummary.ani_fat_goal)
+    ? todaySummary.ani_fat_goal : todaySummary.fat_goal;
+
   return (
     <>
       {/* Today's Progress */}
@@ -18,7 +28,7 @@ export default function GoalProgress({ todaySummary, goalType }: GoalProgressPro
               {
                 label: "Calories",
                 value: todaySummary.calories_today,
-                goal: todaySummary.calorie_goal,
+                goal: effectiveCalGoal,
                 bar: "bg-green-500",
                 text: "text-green-700",
                 unit: "kcal",
@@ -26,7 +36,7 @@ export default function GoalProgress({ todaySummary, goalType }: GoalProgressPro
               {
                 label: "Protein",
                 value: todaySummary.protein_today,
-                goal: todaySummary.protein_goal,
+                goal: effectiveProGoal,
                 bar: "bg-blue-500",
                 text: "text-blue-600",
                 unit: "g",
@@ -34,7 +44,7 @@ export default function GoalProgress({ todaySummary, goalType }: GoalProgressPro
               {
                 label: "Carbs",
                 value: todaySummary.carbs_today,
-                goal: todaySummary.carbs_goal,
+                goal: effectiveCarbsGoal,
                 bar: "bg-amber-500",
                 text: "text-amber-600",
                 unit: "g",
@@ -42,7 +52,7 @@ export default function GoalProgress({ todaySummary, goalType }: GoalProgressPro
               {
                 label: "Fat",
                 value: todaySummary.fat_today,
-                goal: todaySummary.fat_goal,
+                goal: effectiveFatGoal,
                 bar: "bg-orange-500",
                 text: "text-orange-600",
                 unit: "g",

@@ -16,6 +16,11 @@ interface Summary {
   protein_goal: number | null;
   carbs_goal: number | null;
   fat_goal: number | null;
+  ani_active?: boolean;
+  ani_calorie_goal?: number | null;
+  ani_protein_goal?: number | null;
+  ani_carbs_goal?: number | null;
+  ani_fat_goal?: number | null;
 }
 
 interface ImageItem {

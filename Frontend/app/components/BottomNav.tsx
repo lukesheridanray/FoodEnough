@@ -1,6 +1,6 @@
 "use client";
 
-import { Home, BarChart2, Dumbbell, User } from "lucide-react";
+import { Home, BarChart2, Brain, Dumbbell, User } from "lucide-react";
 import { useRouter, usePathname } from "next/navigation";
 
 export default function BottomNav() {
@@ -10,6 +10,7 @@ export default function BottomNav() {
   const tabs = [
     { id: "home", icon: Home, label: "Home", href: "/" },
     { id: "diary", icon: BarChart2, label: "Journal", href: "/diary" },
+    { id: "ani", icon: Brain, label: "ANI", href: "/ani" },
     { id: "workouts", icon: Dumbbell, label: "Workouts", href: "/workouts" },
     { id: "profile", icon: User, label: "Profile", href: "/profile" },
   ];
@@ -26,7 +27,7 @@ export default function BottomNav() {
             onClick={() => router.push(tab.href)}
             aria-label={tab.label}
             aria-current={active ? "page" : undefined}
-            className="flex flex-col items-center gap-0.5 px-4 py-1 transition-all"
+            className="flex flex-col items-center gap-0.5 px-2 py-1 transition-all"
           >
             <div className={`p-2 rounded-xl transition-all ${active ? "bg-green-100" : ""}`}>
               <Icon className={`w-5 h-5 transition-colors ${active ? "text-green-700" : "text-gray-400"}`} />

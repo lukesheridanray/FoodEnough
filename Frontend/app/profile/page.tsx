@@ -74,7 +74,14 @@ export default function ProfilePage() {
     <div className="min-h-screen bg-gradient-to-b from-green-100 to-green-50 pb-24">
       <div style={{ height: 'max(24px, env(safe-area-inset-top))' }} />
       <header className="px-5 py-3">
-        <h1 className="text-xl font-bold text-green-900">Profile & Settings</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-bold text-green-900">Profile & Settings</h1>
+          {p.profile?.is_premium && (
+            <span className="text-xs font-semibold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
+              Premium
+            </span>
+          )}
+        </div>
         {p.profile && <p className="text-sm text-gray-500">{p.profile.email}</p>}
       </header>
 

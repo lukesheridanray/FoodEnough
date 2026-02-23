@@ -8,6 +8,17 @@ interface SummaryCardProps {
 }
 
 export default function SummaryCard({ summary, summaryLoading }: SummaryCardProps) {
+  // Resolve effective goals: prefer ANI targets when active
+  const effectiveCalGoal = (summary?.ani_active && summary?.ani_calorie_goal)
+    ? summary.ani_calorie_goal : summary?.calorie_goal ?? null;
+  const effectiveProGoal = (summary?.ani_active && summary?.ani_protein_goal)
+    ? summary.ani_protein_goal : summary?.protein_goal ?? null;
+  const effectiveCarbsGoal = (summary?.ani_active && summary?.ani_carbs_goal)
+    ? summary.ani_carbs_goal : summary?.carbs_goal ?? null;
+  const effectiveFatGoal = (summary?.ani_active && summary?.ani_fat_goal)
+    ? summary.ani_fat_goal : summary?.fat_goal ?? null;
+  const aniActive = summary?.ani_active ?? false;
+
   return (
     <section className="px-5 mt-2">
       {summaryLoading ? (
@@ -22,24 +33,25 @@ export default function SummaryCard({ summary, summaryLoading }: SummaryCardProp
           <div className="flex items-end justify-between mb-4">
             <div>
               <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-0.5">
-                {summary.calorie_goal
+                {effectiveCalGoal
                   ? (summary.calories_remaining != null && summary.calories_remaining < 0 ? "Over Goal" : "Calories Remaining")
                   : "Calories Today"}
               </p>
               {(() => {
-                const displayVal = summary.calorie_goal
+                const displayVal = effectiveCalGoal
                   ? (summary.calories_remaining ?? summary.calories_today)
                   : summary.calories_today;
-                const isOver = summary.calorie_goal && summary.calories_remaining != null && summary.calories_remaining < 0;
+                const isOver = effectiveCalGoal && summary.calories_remaining != null && summary.calories_remaining < 0;
                 return (
                   <p className={`text-5xl font-bold leading-none ${isOver ? "text-red-500" : "text-green-700"}`}>
                     {isOver ? `+${Math.abs(displayVal)}` : displayVal}
                   </p>
                 );
               })()}
-              {summary.calorie_goal && (
+              {effectiveCalGoal && (
                 <p className="text-sm text-gray-400 mt-1">
-                  of {summary.calorie_goal} kcal goal
+                  of {effectiveCalGoal} kcal goal
+                  {aniActive && <span className="ml-1 text-xs font-semibold text-teal-600">[ANI]</span>}
                 </p>
               )}
             </div>
@@ -61,18 +73,18 @@ export default function SummaryCard({ summary, summaryLoading }: SummaryCardProp
           </div>
 
           {/* Calorie progress bar */}
-          {summary.calorie_goal && (
+          {effectiveCalGoal && (
             <div className="mb-4">
               <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-green-500 rounded-full transition-all"
                   style={{
-                    width: `${Math.min(100, Math.round((summary.calories_today / summary.calorie_goal) * 100))}%`
+                    width: `${Math.min(100, Math.round((summary.calories_today / effectiveCalGoal) * 100))}%`
                   }}
                 />
               </div>
               <p className="text-xs text-gray-400 mt-1">
-                {summary.calories_today} / {summary.calorie_goal} kcal eaten
+                {summary.calories_today} / {effectiveCalGoal} kcal eaten
               </p>
             </div>
           )}
@@ -88,13 +100,13 @@ export default function SummaryCard({ summary, summaryLoading }: SummaryCardProp
           )}
 
           {/* Macro bars */}
-          {(summary.protein_goal || summary.carbs_goal || summary.fat_goal ||
+          {(effectiveProGoal || effectiveCarbsGoal || effectiveFatGoal ||
             summary.protein_today > 0 || summary.carbs_today > 0 || summary.fat_today > 0) && (
             <div className="flex gap-2">
               {[
-                { label: "Protein", value: summary.protein_today, goal: summary.protein_goal, barColor: "bg-blue-500", textColor: "text-blue-600" },
-                { label: "Carbs", value: summary.carbs_today, goal: summary.carbs_goal, barColor: "bg-amber-500", textColor: "text-amber-600" },
-                { label: "Fat", value: summary.fat_today, goal: summary.fat_goal, barColor: "bg-orange-500", textColor: "text-orange-600" },
+                { label: "Protein", value: summary.protein_today, goal: effectiveProGoal, barColor: "bg-blue-500", textColor: "text-blue-600" },
+                { label: "Carbs", value: summary.carbs_today, goal: effectiveCarbsGoal, barColor: "bg-amber-500", textColor: "text-amber-600" },
+                { label: "Fat", value: summary.fat_today, goal: effectiveFatGoal, barColor: "bg-orange-500", textColor: "text-orange-600" },
               ].map((macro) => (
                 <div key={macro.label} className="flex-1">
                   <div className="flex justify-between items-baseline mb-0.5">
