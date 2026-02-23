@@ -88,7 +88,7 @@ export default function WorkoutsPage() {
             {w.generatingPlan ? (
               <>
                 <Loader2 className="w-5 h-5 animate-spin" />
-                Generating your plan\u2026 (~15s)
+                Generating your plan\u2026
               </>
             ) : (
               "\u2728 Generate My 6-Week Plan"

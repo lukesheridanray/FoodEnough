@@ -47,3 +47,58 @@ export function safeSetItem(key: string, value: string): void {
     // Storage full or unavailable
   }
 }
+
+/** Get the user's preferred timezone (IANA string like "America/New_York") */
+export function getTimezone(): string {
+  const saved = safeGetItem("timezone");
+  if (saved) return saved;
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    return "UTC";
+  }
+}
+
+/** Get the UTC offset in minutes for the user's preferred timezone */
+export function getTzOffsetMinutes(): number {
+  const tz = getTimezone();
+  try {
+    // Calculate offset by comparing UTC time to local time in the target timezone
+    const now = new Date();
+    const utcStr = now.toLocaleString("en-US", { timeZone: "UTC" });
+    const tzStr = now.toLocaleString("en-US", { timeZone: tz });
+    const utcDate = new Date(utcStr);
+    const tzDate = new Date(tzStr);
+    return Math.round((tzDate.getTime() - utcDate.getTime()) / 60000);
+  } catch {
+    return -new Date().getTimezoneOffset();
+  }
+}
+
+/** Format a UTC timestamp string in the user's preferred timezone */
+export function formatTime(timestamp: string): string {
+  const tz = getTimezone();
+  try {
+    return new Date(timestamp).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: tz,
+    });
+  } catch {
+    return new Date(timestamp).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+}
+
+/** Format a UTC timestamp as a date string in the user's preferred timezone */
+export function formatDate(timestamp: string, options?: Intl.DateTimeFormatOptions): string {
+  const tz = getTimezone();
+  const defaults: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric" };
+  try {
+    return new Date(timestamp).toLocaleDateString("en-US", { ...defaults, ...options, timeZone: tz });
+  } catch {
+    return new Date(timestamp).toLocaleDateString("en-US", { ...defaults, ...options });
+  }
+}

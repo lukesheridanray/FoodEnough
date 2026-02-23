@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { apiFetch, UnauthorizedError } from "../../lib/api";
+import { getTzOffsetMinutes } from "../../lib/auth";
 
 interface ManualInputTabProps {
   onLogged: () => void;
@@ -39,7 +40,7 @@ export default function ManualInputTab({ onLogged, onUnauthorized }: ManualInput
     setManualError("");
     setManualLoading(true);
     try {
-      const tzOffset = -new Date().getTimezoneOffset();
+      const tzOffset = getTzOffsetMinutes();
       const res = await apiFetch(`/logs/manual?tz_offset_minutes=${tzOffset}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

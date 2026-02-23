@@ -1,6 +1,7 @@
 "use client";
 
-import { removeToken } from "../../lib/auth";
+import { useState } from "react";
+import { removeToken, getTimezone, safeSetItem } from "../../lib/auth";
 import { useRouter } from "next/navigation";
 import BottomNav from "../components/BottomNav";
 import HealthSurvey from "../components/HealthSurvey";
@@ -9,9 +10,46 @@ import GoalProgress from "../components/GoalProgress";
 import { useProfile } from "../hooks/useProfile";
 import { LogOut } from "lucide-react";
 
+const COMMON_TIMEZONES = [
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Anchorage",
+  "Pacific/Honolulu",
+  "America/Phoenix",
+  "America/Toronto",
+  "America/Vancouver",
+  "Europe/London",
+  "Europe/Paris",
+  "Europe/Berlin",
+  "Asia/Tokyo",
+  "Asia/Shanghai",
+  "Asia/Kolkata",
+  "Australia/Sydney",
+  "Pacific/Auckland",
+];
+
+function tzLabel(tz: string): string {
+  try {
+    const offset = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "shortOffset" })
+      .formatToParts(new Date())
+      .find((p) => p.type === "timeZoneName")?.value ?? "";
+    return `${tz.replace(/_/g, " ").replace(/\//g, " / ")} (${offset})`;
+  } catch {
+    return tz;
+  }
+}
+
 export default function ProfilePage() {
   const router = useRouter();
   const p = useProfile();
+  const [timezone, setTimezoneState] = useState(getTimezone);
+
+  const handleTimezoneChange = (tz: string) => {
+    setTimezoneState(tz);
+    safeSetItem("timezone", tz);
+  };
 
   if (p.loading) return (
     <div className="min-h-screen bg-gradient-to-b from-green-100 to-green-50 pb-24">
@@ -134,6 +172,30 @@ export default function ProfilePage() {
         loading={p.loading}
         onLogWeight={p.handleLogWeight}
       />
+
+      {/* Timezone Setting */}
+      <section className="px-5 mt-6">
+        <div className="bg-white rounded-2xl shadow-sm p-5">
+          <h2 className="text-base font-bold text-green-900 mb-3">Settings</h2>
+          <div>
+            <label htmlFor="timezone-select" className="text-sm text-gray-600 block mb-1">Timezone for meal logging</label>
+            <select
+              id="timezone-select"
+              value={timezone}
+              onChange={(e) => handleTimezoneChange(e.target.value)}
+              className="w-full border border-green-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none bg-white"
+            >
+              {!COMMON_TIMEZONES.includes(timezone) && (
+                <option value={timezone}>{tzLabel(timezone)}</option>
+              )}
+              {COMMON_TIMEZONES.map((tz) => (
+                <option key={tz} value={tz}>{tzLabel(tz)}</option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-400 mt-1">Used for meal times and daily log boundaries</p>
+          </div>
+        </div>
+      </section>
 
       <section className="px-5 mt-6 pb-4">
         <button

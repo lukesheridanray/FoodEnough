@@ -10,6 +10,7 @@ import ManualInputTab from "./components/ManualInputTab";
 import LogList from "./components/LogList";
 import { useFoodLogs, BarcodeResult } from "./hooks/useFoodLogs";
 import { apiFetch, UnauthorizedError } from "../lib/api";
+import { getTzOffsetMinutes } from "../lib/auth";
 
 export default function FoodEnoughApp() {
   const {
@@ -27,6 +28,7 @@ export default function FoodEnoughApp() {
     setEditError,
     favorites,
     deleteError,
+    exportError,
     loadLogs,
     loadSummary,
     loadFavorites,
@@ -105,7 +107,7 @@ export default function FoodEnoughApp() {
     setSaveBarcodeError("");
     setSavingBarcode(true);
     try {
-      const tzOffset = -new Date().getTimezoneOffset();
+      const tzOffset = getTzOffsetMinutes();
       const res = await apiFetch(`/logs/save-parsed?tz_offset_minutes=${tzOffset}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -334,6 +336,7 @@ export default function FoodEnoughApp() {
         editError={editError}
         setEditError={setEditError}
         deleteError={deleteError}
+        exportError={exportError}
         onEditSave={handleEditSave}
         onDelete={handleDelete}
         onExport={handleExport}

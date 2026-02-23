@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { setToken } from "../../lib/auth";
 import { API_URL } from "../../lib/config";
+import PasswordInput from "../components/PasswordInput";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -58,14 +59,11 @@ export default function LoginPage() {
           </div>
           <div>
             <label htmlFor="login-password" className="text-sm text-gray-600 block mb-1">Password</label>
-            <input
+            <PasswordInput
               id="login-password"
-              type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              required
               autoComplete="current-password"
-              className="w-full border border-green-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
             />
           </div>
           {error && <p role="alert" className="text-red-500 text-sm">{error}</p>}

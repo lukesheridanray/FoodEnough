@@ -1,6 +1,7 @@
 "use client";
 import { Pencil, Loader2 } from "lucide-react";
 import { Log } from "../hooks/useFoodLogs";
+import { formatTime } from "../../lib/auth";
 
 interface LogListProps {
   logs: Log[];
@@ -119,7 +120,7 @@ function LogCard({
                 </div>
               )}
               <div className="text-xs text-gray-400 mt-1">
-                {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                {formatTime(log.timestamp)}
               </div>
             </div>
             {deleteConfirmId !== log.id && (

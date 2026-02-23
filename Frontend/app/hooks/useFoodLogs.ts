@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { getToken, removeToken } from "../../lib/auth";
+import { getToken, removeToken, getTzOffsetMinutes } from "../../lib/auth";
 import { apiFetch, UnauthorizedError } from "../../lib/api";
 
 interface Summary {
@@ -74,6 +74,7 @@ export function useFoodLogs() {
   const [editError, setEditError] = useState("");
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [deleteError, setDeleteError] = useState("");
+  const [exportError, setExportError] = useState("");
   const router = useRouter();
 
   const handleUnauthorized = () => {
@@ -82,7 +83,7 @@ export function useFoodLogs() {
 
   const loadLogs = async () => {
     try {
-      const tzOffset = -new Date().getTimezoneOffset();
+      const tzOffset = getTzOffsetMinutes();
       const res = await apiFetch(`/logs/today?tz_offset_minutes=${tzOffset}`);
       const data = await res.json().catch(() => ({ logs: [] }));
       setLogs(data.logs || []);
@@ -94,7 +95,7 @@ export function useFoodLogs() {
 
   const loadSummary = async () => {
     try {
-      const tzOffset = -new Date().getTimezoneOffset();
+      const tzOffset = getTzOffsetMinutes();
       const res = await apiFetch(`/summary/today?tz_offset_minutes=${tzOffset}`);
       if (res.ok) setSummary(await res.json().catch(() => null));
     } catch (err) {
@@ -124,8 +125,13 @@ export function useFoodLogs() {
   }, []);
 
   const handleExport = async () => {
+    setExportError("");
     try {
       const res = await apiFetch("/logs/export");
+      if (!res.ok) {
+        setExportError("Export failed. Please try again.");
+        return;
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -135,7 +141,7 @@ export function useFoodLogs() {
       URL.revokeObjectURL(url);
     } catch (err) {
       if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
-      console.error("Export failed:", err);
+      setExportError("Export failed. Please check your connection and try again.");
     }
   };
 
@@ -181,7 +187,7 @@ export function useFoodLogs() {
 
   const handleQuickAdd = async (fav: Favorite) => {
     try {
-      const tzOffset = -new Date().getTimezoneOffset();
+      const tzOffset = getTzOffsetMinutes();
       const res = await apiFetch(`/logs/save-parsed?tz_offset_minutes=${tzOffset}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -228,6 +234,7 @@ export function useFoodLogs() {
     favorites,
     deleteError,
     setDeleteError,
+    exportError,
     loadLogs,
     loadSummary,
     loadFavorites,

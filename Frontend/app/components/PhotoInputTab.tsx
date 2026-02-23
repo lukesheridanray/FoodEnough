@@ -2,6 +2,7 @@
 import { useState, useRef } from "react";
 import { Camera, X, Loader2 } from "lucide-react";
 import { apiFetch, UnauthorizedError } from "../../lib/api";
+import { getTzOffsetMinutes } from "../../lib/auth";
 import { ImageAnalysis } from "../hooks/useFoodLogs";
 
 interface PhotoInputTabProps {
@@ -74,7 +75,7 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
     setSaveImageError("");
     setSavingImage(true);
     try {
-      const tzOffset = -new Date().getTimezoneOffset();
+      const tzOffset = getTzOffsetMinutes();
       const res = await apiFetch(`/logs/save-parsed?tz_offset_minutes=${tzOffset}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

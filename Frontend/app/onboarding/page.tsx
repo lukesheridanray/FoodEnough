@@ -200,7 +200,7 @@ export default function OnboardingPage() {
 
   // ── Progress indicator ──
   const stepNumber =
-    step === "health" ? 1 : step === "offer" ? 2 : step === "fitness" ? 2 : 3;
+    step === "health" ? 1 : step === "offer" ? 2 : step === "fitness" ? 3 : 3;
   const totalSteps = 3;
 
   // ── Render ──

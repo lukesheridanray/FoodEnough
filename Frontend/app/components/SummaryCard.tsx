@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { Summary } from "../hooks/useFoodLogs";
 
 interface SummaryCardProps {
@@ -74,6 +75,16 @@ export default function SummaryCard({ summary, summaryLoading }: SummaryCardProp
                 {summary.calories_today} / {summary.calorie_goal} kcal eaten
               </p>
             </div>
+          )}
+
+          {/* Goal nudge */}
+          {!summary.calorie_goal && summary.calories_today === 0 && (
+            <Link
+              href="/profile"
+              className="block mt-3 text-xs text-center text-green-600 bg-green-50 rounded-xl px-3 py-2 hover:bg-green-100 transition-colors"
+            >
+              Set up your calorie and macro goals in Profile for personalized tracking
+            </Link>
           )}
 
           {/* Macro bars */}

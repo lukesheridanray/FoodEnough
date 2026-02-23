@@ -3,6 +3,7 @@ import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { API_URL } from "../../lib/config";
+import PasswordInput from "../components/PasswordInput";
 
 function ResetPasswordForm() {
   const [password, setPassword] = useState("");
@@ -66,28 +67,22 @@ function ResetPasswordForm() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label htmlFor="reset-password" className="text-sm text-gray-600 block mb-1">New password</label>
-              <input
+              <PasswordInput
                 id="reset-password"
-                type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                required
                 autoComplete="new-password"
                 placeholder="At least 8 characters"
-                className="w-full border border-green-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
               />
             </div>
             <div>
               <label htmlFor="reset-confirm" className="text-sm text-gray-600 block mb-1">Confirm password</label>
-              <input
+              <PasswordInput
                 id="reset-confirm"
-                type="password"
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
-                required
                 autoComplete="new-password"
                 placeholder="Repeat your new password"
-                className="w-full border border-green-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
               />
             </div>
             {error && <p role="alert" className="text-red-500 text-sm">{error}</p>}

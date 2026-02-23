@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getToken } from "../../lib/auth";
+import { getToken, formatDate } from "../../lib/auth";
 import { apiFetch, UnauthorizedError } from "../../lib/api";
 import BottomNav from "../components/BottomNav";
 import {
@@ -90,7 +90,7 @@ export default function DiaryPage() {
         const totals: WeekTotal = { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, sugar: 0, sodium: 0 };
 
         for (const log of data.logs) {
-          const date = new Date(log.timestamp).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+          const date = formatDate(log.timestamp);
           if (!grouped[date]) grouped[date] = [];
 
           const parsed =

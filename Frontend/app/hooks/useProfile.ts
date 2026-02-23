@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { getToken, removeToken, safeGetItem, safeSetItem } from "../../lib/auth";
+import { getToken, removeToken, safeGetItem, safeSetItem, getTzOffsetMinutes } from "../../lib/auth";
 import { apiFetch, UnauthorizedError } from "../../lib/api";
 
 interface Profile {
@@ -148,7 +148,7 @@ export function useProfile() {
 
   const loadTodaySummary = async () => {
     try {
-      const tzOffset = -new Date().getTimezoneOffset();
+      const tzOffset = getTzOffsetMinutes();
       const summaryRes = await apiFetch(`/summary/today?tz_offset_minutes=${tzOffset}`);
       if (summaryRes.ok) setTodaySummary(await summaryRes.json().catch(() => null));
     } catch (err) {
