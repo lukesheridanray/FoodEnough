@@ -238,6 +238,22 @@ export default function DiaryPage() {
           >→</button>
         </div>
 
+        {/* Premium Analytics link */}
+        <Link
+          href="/analytics"
+          className="block bg-gradient-to-r from-blue-50 to-indigo-50 border border-indigo-200 rounded-2xl p-4 mb-6 hover:shadow-md transition-shadow"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
+              <BarChart3 className="w-5 h-5 text-indigo-600" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-indigo-900">Premium Analytics</p>
+              <p className="text-xs text-indigo-600">Trends, streaks, projections & more</p>
+            </div>
+          </div>
+        </Link>
+
         {/* Empty state */}
         {dailyLogs.length === 0 && (
           <div className="py-16 text-center">
@@ -408,22 +424,6 @@ export default function DiaryPage() {
             </table>
           </div>
         </>)}
-
-        {/* Premium Analytics link */}
-        <Link
-          href="/analytics"
-          className="block bg-gradient-to-r from-blue-50 to-indigo-50 border border-indigo-200 rounded-2xl p-4 mb-6 hover:shadow-md transition-shadow"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
-              <BarChart3 className="w-5 h-5 text-indigo-600" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-indigo-900">Premium Analytics</p>
-              <p className="text-xs text-indigo-600">Trends, streaks, projections & more</p>
-            </div>
-          </div>
-        </Link>
 
         <BottomNav />
       </div>
