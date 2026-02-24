@@ -15,6 +15,7 @@ interface Profile {
   height_cm?: number | null;
   activity_level?: string | null;
   goal_type?: string | null;
+  goal_weight_lbs?: number | null;
   is_premium?: boolean;
 }
 
@@ -93,6 +94,11 @@ export function useProfile() {
     return (safeGetItem('weightUnit') as 'lbs' | 'kg') ?? 'lbs';
   });
 
+  const [goalWeight, setGoalWeight] = useState<string>("");
+  const [savingGoalWeight, setSavingGoalWeight] = useState(false);
+  const [goalWeightError, setGoalWeightError] = useState("");
+  const [goalWeightSuccess, setGoalWeightSuccess] = useState(false);
+
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deleteAccountError, setDeleteAccountError] = useState("");
@@ -132,6 +138,7 @@ export function useProfile() {
       }
       if (data.activity_level) setActivityLevel(data.activity_level);
       if (data.goal_type) setGoalType(data.goal_type as 'lose' | 'maintain' | 'gain');
+      if (data.goal_weight_lbs) setGoalWeight(String(data.goal_weight_lbs));
       const profileComplete = !!(data.age && data.sex && data.height_cm && data.activity_level);
       setSurveyMode(!profileComplete);
     } catch (err) {
@@ -267,6 +274,39 @@ export function useProfile() {
     }
   };
 
+  const handleSaveGoalWeight = async () => {
+    const val = parseFloat(goalWeight);
+    if (!goalWeight || isNaN(val)) return;
+    const lbs = weightUnit === 'kg' ? parseFloat((val * 2.20462).toFixed(1)) : val;
+    if (lbs < 50 || lbs > 700) {
+      setGoalWeightError("Goal weight must be between 50 and 700 lbs.");
+      return;
+    }
+    setGoalWeightError("");
+    setGoalWeightSuccess(false);
+    setSavingGoalWeight(true);
+    try {
+      const res = await apiFetch("/profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ goal_weight_lbs: lbs }),
+      });
+      if (res.ok) {
+        setGoalWeightSuccess(true);
+        setProfile((prev) => prev ? { ...prev, goal_weight_lbs: lbs } : prev);
+        setTimeout(() => setGoalWeightSuccess(false), 3000);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setGoalWeightError(parseApiError(err.detail) || "Failed to save goal weight.");
+      }
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
+      setGoalWeightError("Connection failed. Please try again.");
+    } finally {
+      setSavingGoalWeight(false);
+    }
+  };
+
   const handleDeleteAccount = async () => {
     setDeleteAccountError("");
     setDeletingAccount(true);
@@ -345,6 +385,12 @@ export function useProfile() {
     setDeleteAccountError,
     handleCalculateGoals,
     handleLogWeight,
+    goalWeight,
+    setGoalWeight,
+    savingGoalWeight,
+    goalWeightError,
+    goalWeightSuccess,
+    handleSaveGoalWeight,
     handleDeleteAccount,
     displayWeight,
     unitLabel,

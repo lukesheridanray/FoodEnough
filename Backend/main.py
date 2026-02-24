@@ -96,6 +96,7 @@ class User(Base):
     height_cm = Column(Float, nullable=True)
     activity_level = Column(String, nullable=True)  # 'sedentary','light','moderate','active','very_active'
     goal_type = Column(String, nullable=True)        # 'lose', 'maintain', 'gain'
+    goal_weight_lbs = Column(Float, nullable=True)     # target weight in pounds
     learned_neat = Column(Float, nullable=True)  # ANI's learned NEAT estimate (kcal/day), updated over time
     is_verified = Column(Integer, default=0)           # 0 = unverified, 1 = verified
     verification_token = Column(String, nullable=True)
@@ -1649,6 +1650,14 @@ class ProfileUpdate(BaseModel):
     height_cm: Optional[float] = None
     activity_level: Optional[str] = None
     goal_type: Optional[str] = None  # 'lose', 'maintain', 'gain'
+    goal_weight_lbs: Optional[float] = None
+
+    @field_validator("goal_weight_lbs")
+    @classmethod
+    def goal_weight_valid(cls, v):
+        if v is not None and not (50 <= v <= 700):
+            raise ValueError("goal_weight_lbs must be between 50 and 700")
+        return v
 
     @field_validator("calorie_goal")
     @classmethod
@@ -2676,6 +2685,7 @@ def get_profile(
         "height_cm": current_user.height_cm,
         "activity_level": current_user.activity_level,
         "goal_type": current_user.goal_type,
+        "goal_weight_lbs": current_user.goal_weight_lbs,
         "is_verified": bool(current_user.is_verified),
         "is_premium": bool(current_user.is_premium),
     }
@@ -2713,6 +2723,8 @@ def update_profile(
         current_user.activity_level = data.activity_level
     if data.goal_type is not None:
         current_user.goal_type = data.goal_type
+    if data.goal_weight_lbs is not None:
+        current_user.goal_weight_lbs = data.goal_weight_lbs
 
     db.commit()
     db.refresh(current_user)
@@ -2727,6 +2739,7 @@ def update_profile(
         "height_cm": current_user.height_cm,
         "activity_level": current_user.activity_level,
         "goal_type": current_user.goal_type,
+        "goal_weight_lbs": current_user.goal_weight_lbs,
     }
 
 
@@ -4766,12 +4779,40 @@ def analytics_projections(
             "projected_weight": projected,
         })
 
+    # Goal-aware extended projections
+    goal_weight = current_user.goal_weight_lbs
+    weeks_to_goal = None
+    extended_projections = []
+    moving_toward_goal = None
+    calorie_deficit = round(abs(weekly_rate) * 3500 / 7) if weekly_rate != 0 else 0
+
+    if goal_weight is not None and weekly_rate != 0:
+        diff = goal_weight - current_weight
+        # Check if trend is moving toward goal
+        moving_toward_goal = (diff > 0 and weekly_rate > 0) or (diff < 0 and weekly_rate < 0)
+        if moving_toward_goal:
+            weeks_to_goal = round(diff / weekly_rate, 1)
+            max_weeks = min(int(weeks_to_goal) + 2, 52)
+        else:
+            max_weeks = 26  # show 6 months of divergence
+
+        for w in range(1, max_weeks + 1):
+            extended_projections.append({
+                "week": w,
+                "projected_weight": round(current_weight + weekly_rate * w, 1),
+            })
+
     return {
         "current_weight": current_weight,
         "weekly_rate": round(weekly_rate, 2),
         "avg_daily_expenditure": avg_daily_expenditure,
         "projections": projections,
         "data_points": len(weight_entries),
+        "goal_weight_lbs": goal_weight,
+        "weeks_to_goal": weeks_to_goal,
+        "moving_toward_goal": moving_toward_goal,
+        "extended_projections": extended_projections,
+        "calorie_deficit": calorie_deficit,
     }
 
 

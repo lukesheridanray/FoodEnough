@@ -179,6 +179,14 @@ export default function ProfilePage() {
         unitLabel={p.unitLabel}
         loading={p.loading}
         onLogWeight={p.handleLogWeight}
+        goalWeight={p.goalWeight}
+        setGoalWeight={p.setGoalWeight}
+        savingGoalWeight={p.savingGoalWeight}
+        goalWeightError={p.goalWeightError}
+        goalWeightSuccess={p.goalWeightSuccess}
+        onSaveGoalWeight={p.handleSaveGoalWeight}
+        isPremium={!!p.profile?.is_premium}
+        profileGoalWeight={p.profile?.goal_weight_lbs ?? null}
       />
 
       {/* Premium Analytics link */}
