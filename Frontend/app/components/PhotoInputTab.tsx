@@ -67,7 +67,7 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
       }
     } catch (err) {
       if (err instanceof UnauthorizedError) { onUnauthorized(); return; }
-      setAnalysisError("Network error. Is the backend running?");
+      setAnalysisError("Something went wrong. Please try again.");
     } finally {
       setAnalyzingImage(false);
     }
@@ -133,7 +133,7 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
       }
     } catch (err) {
       if (err instanceof UnauthorizedError) { onUnauthorized(); return; }
-      setSaveImageError("Network error. Is the backend running?");
+      setSaveImageError("Something went wrong. Please try again.");
     } finally {
       setSavingImage(false);
     }

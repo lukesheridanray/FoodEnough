@@ -37,7 +37,7 @@ export default function SignupPage() {
         setError(data.detail || "Registration failed");
         return;
       }
-      if (!data.access_token) { setError("Invalid server response."); return; }
+      if (!data.access_token) { setError("Registration failed. Please try again."); return; }
       setToken(data.access_token);
       router.push("/onboarding");
     } catch {

@@ -70,7 +70,7 @@ export function useHealthMetrics() {
         handleUnauthorized();
         return;
       }
-      setSaveError("Network error. Is the backend running?");
+      setSaveError("Something went wrong. Please try again.");
     } finally {
       setSaving(false);
     }

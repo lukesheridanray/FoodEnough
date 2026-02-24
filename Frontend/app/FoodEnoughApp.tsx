@@ -80,12 +80,14 @@ export default function FoodEnoughApp() {
   const [saveBarcodeError, setSaveBarcodeError] = useState("");
   const [barcodeSaveSuccess, setBarcodeSaveSuccess] = useState(false);
   const [lookingUpBarcode, setLookingUpBarcode] = useState(false);
+  const [barcodeServings, setBarcodeServings] = useState(1);
 
   const clearBarcode = () => {
     setBarcodeResult(null);
     setBarcodeError("");
     setSaveBarcodeError("");
     setLookingUpBarcode(false);
+    setBarcodeServings(1);
   };
 
   const lookupBarcode = async (code: string) => {
@@ -93,6 +95,7 @@ export default function FoodEnoughApp() {
     setBarcodeError("");
     setBarcodeResult(null);
     setSaveBarcodeError("");
+    setBarcodeServings(1);
     try {
       const res = await fetch(
         `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json`
@@ -124,7 +127,7 @@ export default function FoodEnoughApp() {
         total: { calories, protein, carbs, fat, fiber, sugar, sodium },
       });
     } catch {
-      setBarcodeError("Network error looking up barcode.");
+      setBarcodeError("Something went wrong. Please try again.");
     } finally {
       setLookingUpBarcode(false);
     }
@@ -135,28 +138,47 @@ export default function FoodEnoughApp() {
     lookupBarcode(code);
   };
 
+  // Compute scaled nutrition based on serving multiplier
+  const scaledBarcode = barcodeResult ? {
+    calories: Math.round(barcodeResult.total.calories * barcodeServings),
+    protein: Math.round(barcodeResult.total.protein * barcodeServings * 10) / 10,
+    carbs: Math.round(barcodeResult.total.carbs * barcodeServings * 10) / 10,
+    fat: Math.round(barcodeResult.total.fat * barcodeServings * 10) / 10,
+    fiber: barcodeResult.total.fiber != null ? Math.round(barcodeResult.total.fiber * barcodeServings * 10) / 10 : null,
+    sugar: barcodeResult.total.sugar != null ? Math.round(barcodeResult.total.sugar * barcodeServings * 10) / 10 : null,
+    sodium: barcodeResult.total.sodium != null ? Math.round(barcodeResult.total.sodium * barcodeServings) : null,
+  } : null;
+
   const handleBarcodeSave = async () => {
-    if (!barcodeResult) return;
+    if (!barcodeResult || !scaledBarcode) return;
     setSaveBarcodeError("");
     setSavingBarcode(true);
     try {
       const tzOffset = getTzOffsetMinutes();
+      const servingLabel = barcodeServings === 1 ? "" : ` (${barcodeServings}x)`;
       const res = await apiFetch(`/logs/save-parsed?tz_offset_minutes=${tzOffset}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          input_text: barcodeResult.description,
-          calories: barcodeResult.total.calories,
-          protein: barcodeResult.total.protein,
-          carbs: barcodeResult.total.carbs,
-          fat: barcodeResult.total.fat,
-          fiber: barcodeResult.total.fiber ?? null,
-          sugar: barcodeResult.total.sugar ?? null,
-          sodium: barcodeResult.total.sodium ?? null,
+          input_text: barcodeResult.description + servingLabel,
+          calories: scaledBarcode.calories,
+          protein: scaledBarcode.protein,
+          carbs: scaledBarcode.carbs,
+          fat: scaledBarcode.fat,
+          fiber: scaledBarcode.fiber,
+          sugar: scaledBarcode.sugar,
+          sodium: scaledBarcode.sodium,
           parsed_json: JSON.stringify({
             description: barcodeResult.description,
-            items: barcodeResult.items,
-            total: barcodeResult.total,
+            items: barcodeResult.items.map(item => ({
+              ...item,
+              name: `${barcodeServings}x ${item.name}`,
+              calories: Math.round(item.calories * barcodeServings),
+              protein: Math.round(item.protein * barcodeServings * 10) / 10,
+              carbs: Math.round(item.carbs * barcodeServings * 10) / 10,
+              fat: Math.round(item.fat * barcodeServings * 10) / 10,
+            })),
+            total: scaledBarcode,
           }),
         }),
       });
@@ -175,7 +197,7 @@ export default function FoodEnoughApp() {
       }
     } catch (err) {
       if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
-      setSaveBarcodeError("Network error. Is the backend running?");
+      setSaveBarcodeError("Something went wrong. Please try again.");
     } finally {
       setSavingBarcode(false);
     }
@@ -479,7 +501,7 @@ export default function FoodEnoughApp() {
                 </button>
               </div>
             )}
-            {barcodeResult && !lookingUpBarcode && (
+            {barcodeResult && !lookingUpBarcode && scaledBarcode && (
               <div className="bg-white rounded-2xl p-3 shadow-sm space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-semibold text-gray-700 flex-1 mr-2">
@@ -494,42 +516,98 @@ export default function FoodEnoughApp() {
                     <X className="w-4 h-4" />
                   </button>
                 </div>
+
+                {/* Serving size control */}
+                <div className="flex items-center gap-3 bg-green-50 rounded-xl px-3 py-2.5">
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Servings</span>
+                  <div className="flex items-center gap-1 flex-1 justify-end">
+                    {[0.5, 1, 1.5, 2].map((v) => (
+                      <button
+                        key={v}
+                        onClick={() => setBarcodeServings(v)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                          barcodeServings === v
+                            ? "bg-green-600 text-white shadow-sm"
+                            : "bg-white text-gray-600 hover:bg-green-100 border border-gray-200"
+                        }`}
+                      >
+                        {v}
+                      </button>
+                    ))}
+                    <input
+                      type="number"
+                      min="0.1"
+                      max="20"
+                      step="0.1"
+                      value={barcodeServings}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        if (!isNaN(v) && v > 0 && v <= 20) setBarcodeServings(Math.round(v * 10) / 10);
+                      }}
+                      className="w-14 border border-gray-200 rounded-lg px-2 py-1 text-xs text-center font-semibold focus:ring-2 focus:ring-green-500 focus:outline-none bg-white"
+                    />
+                  </div>
+                </div>
+
+                {/* Nutrition table with scaled values */}
                 <div className="rounded-xl overflow-hidden border border-gray-100">
                   <table className="w-full text-xs">
                     <thead className="bg-gray-50 text-gray-500">
                       <tr>
-                        <th className="text-left px-3 py-1.5 font-medium">Item</th>
-                        <th className="text-right px-2 py-1.5 font-medium">kcal</th>
-                        <th className="text-right px-2 py-1.5 font-medium text-blue-500">P</th>
-                        <th className="text-right px-2 py-1.5 font-medium text-amber-500">C</th>
-                        <th className="text-right px-2 py-1.5 font-medium text-orange-500">F</th>
+                        <th className="text-left px-3 py-1.5 font-medium">Nutrient</th>
+                        <th className="text-right px-2 py-1.5 font-medium">Amount</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {barcodeResult.items.map((item, i) => (
-                        <tr key={i + item.name} className="text-gray-700">
-                          <td className="px-3 py-1.5 capitalize">{item.name}</td>
-                          <td className="text-right px-2 py-1.5">{item.calories}</td>
-                          <td className="text-right px-2 py-1.5">{item.protein}g</td>
-                          <td className="text-right px-2 py-1.5">{item.carbs}g</td>
-                          <td className="text-right px-2 py-1.5">{item.fat}g</td>
-                        </tr>
-                      ))}
-                      <tr className="bg-green-50 font-semibold text-green-800">
-                        <td className="px-3 py-1.5">Total</td>
-                        <td className="text-right px-2 py-1.5">{barcodeResult.total.calories}</td>
-                        <td className="text-right px-2 py-1.5">{barcodeResult.total.protein}g</td>
-                        <td className="text-right px-2 py-1.5">{barcodeResult.total.carbs}g</td>
-                        <td className="text-right px-2 py-1.5">{barcodeResult.total.fat}g</td>
+                      <tr className="text-gray-700">
+                        <td className="px-3 py-1.5">Calories</td>
+                        <td className="text-right px-2 py-1.5 font-semibold">{scaledBarcode.calories} kcal</td>
                       </tr>
+                      <tr className="text-gray-700">
+                        <td className="px-3 py-1.5 text-blue-600">Protein</td>
+                        <td className="text-right px-2 py-1.5 font-semibold">{scaledBarcode.protein}g</td>
+                      </tr>
+                      <tr className="text-gray-700">
+                        <td className="px-3 py-1.5 text-amber-600">Carbs</td>
+                        <td className="text-right px-2 py-1.5 font-semibold">{scaledBarcode.carbs}g</td>
+                      </tr>
+                      <tr className="text-gray-700">
+                        <td className="px-3 py-1.5 text-orange-600">Fat</td>
+                        <td className="text-right px-2 py-1.5 font-semibold">{scaledBarcode.fat}g</td>
+                      </tr>
+                      {scaledBarcode.fiber != null && (
+                        <tr className="text-gray-700">
+                          <td className="px-3 py-1.5">Fiber</td>
+                          <td className="text-right px-2 py-1.5">{scaledBarcode.fiber}g</td>
+                        </tr>
+                      )}
+                      {scaledBarcode.sugar != null && (
+                        <tr className="text-gray-700">
+                          <td className="px-3 py-1.5">Sugar</td>
+                          <td className="text-right px-2 py-1.5">{scaledBarcode.sugar}g</td>
+                        </tr>
+                      )}
+                      {scaledBarcode.sodium != null && (
+                        <tr className="text-gray-700">
+                          <td className="px-3 py-1.5">Sodium</td>
+                          <td className="text-right px-2 py-1.5">{scaledBarcode.sodium}mg</td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
+
+                {barcodeServings !== 1 && (
+                  <p className="text-xs text-gray-400 italic text-center">
+                    Showing nutrition for {barcodeServings} serving{barcodeServings !== 1 ? "s" : ""}
+                  </p>
+                )}
+
                 {saveBarcodeError && <p className="text-red-500 text-xs">{saveBarcodeError}</p>}
                 <button
                   onClick={handleBarcodeSave}
                   disabled={savingBarcode || barcodeSaveSuccess}
-                  className={`w-full py-2 text-sm font-medium rounded-xl shadow-sm flex items-center justify-center gap-1.5 ${
+                  className={`w-full py-2.5 text-sm font-medium rounded-xl shadow-sm flex items-center justify-center gap-1.5 ${
                     barcodeSaveSuccess
                       ? "bg-green-100 text-green-700"
                       : "bg-gradient-to-r from-green-600 to-green-500 text-white disabled:opacity-60"
@@ -540,7 +618,7 @@ export default function FoodEnoughApp() {
                   ) : savingBarcode ? (
                     <><Loader2 className="w-4 h-4 animate-spin" />Saving{"\u2026"}</>
                   ) : (
-                    "Save Log \u2192"
+                    `Confirm & Log ${scaledBarcode.calories} kcal \u2192`
                   )}
                 </button>
               </div>

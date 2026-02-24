@@ -28,7 +28,7 @@ export default function LoginPage() {
         setError(data.detail || "Login failed");
         return;
       }
-      if (!data.access_token) { setError("Invalid server response."); return; }
+      if (!data.access_token) { setError("Login failed. Please try again."); return; }
       setToken(data.access_token);
       router.push("/");
     } catch {

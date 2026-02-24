@@ -2103,13 +2103,13 @@ def parse_log_text(
             parsed = extract_json(ai_reply)
         except Exception as e:
             print("JSON parsing failed:", e)
-            raise HTTPException(status_code=500, detail="AI response was not valid JSON")
+            raise HTTPException(status_code=500, detail="Something went wrong. Please try again.")
         return {"status": "success", "parsed": parsed}
     except HTTPException:
         raise
     except Exception as e:
         print("/parse_log/text error:", e)
-        raise HTTPException(status_code=500, detail="An internal error occurred")
+        raise HTTPException(status_code=500, detail="Something went wrong. Please try again.")
 
 
 # ============================================================
@@ -2143,7 +2143,7 @@ def save_log(
             total = parsed["total"]
         except Exception as e:
             print("JSON parsing failed:", e)
-            raise HTTPException(status_code=500, detail="AI response was not valid JSON")
+            raise HTTPException(status_code=500, detail="Something went wrong. Please try again.")
 
         now = datetime.utcnow()
         log = FoodLog(
@@ -2170,7 +2170,7 @@ def save_log(
     except Exception as e:
         db.rollback()
         print("/save_log error:", e)
-        raise HTTPException(status_code=500, detail="An internal error occurred")
+        raise HTTPException(status_code=500, detail="Something went wrong. Please try again.")
 
 
 # ============================================================
@@ -2221,7 +2221,7 @@ def update_log(
             parsed = extract_json(ai_reply)
             total = parsed["total"]
         except Exception:
-            raise HTTPException(status_code=500, detail="AI response was not valid JSON")
+            raise HTTPException(status_code=500, detail="Something went wrong. Please try again.")
 
         log.input_text = data.input_text
         log.parsed_json = json.dumps(parsed)
@@ -2240,7 +2240,7 @@ def update_log(
     except Exception as e:
         db.rollback()
         print(f"PUT /logs/{log_id} error:", e)
-        raise HTTPException(status_code=500, detail="An internal error occurred")
+        raise HTTPException(status_code=500, detail="Something went wrong. Please try again.")
 
 
 # ============================================================
@@ -2404,7 +2404,7 @@ async def save_log_from_image(
             total = parsed["total"]
         except Exception as e:
             print("Image log JSON parse error:", e)
-            raise HTTPException(status_code=500, detail="AI response was not valid JSON")
+            raise HTTPException(status_code=500, detail="Something went wrong. Please try again.")
 
         description = parsed.get("description", "Photo log")
 
@@ -2432,7 +2432,7 @@ async def save_log_from_image(
     except Exception as e:
         db.rollback()
         print("/save_log/image error:", e)
-        raise HTTPException(status_code=500, detail="An internal error occurred")
+        raise HTTPException(status_code=500, detail="Something went wrong. Please try again.")
 
 
 # ============================================================
@@ -2489,7 +2489,7 @@ async def parse_log_from_image(
             parsed = extract_json(ai_reply)
         except Exception as e:
             print("/parse_log/image JSON parse error:", e)
-            raise HTTPException(status_code=500, detail="AI response was not valid JSON")
+            raise HTTPException(status_code=500, detail="Something went wrong. Please try again.")
 
         return {
             "description": parsed.get("description", "Photo log"),
@@ -2501,7 +2501,7 @@ async def parse_log_from_image(
         raise
     except Exception as e:
         print("/parse_log/image error:", e)
-        raise HTTPException(status_code=500, detail="An internal error occurred")
+        raise HTTPException(status_code=500, detail="Something went wrong. Please try again.")
 
 
 # ============================================================
@@ -3361,7 +3361,7 @@ Return ONLY valid JSON (no markdown, no code fences):
         try:
             parsed = extract_json(ai_reply, require_total=False)
         except Exception:
-            raise HTTPException(status_code=500, detail="AI returned an unexpected response. Please try again.")
+            raise HTTPException(status_code=500, detail="Something went wrong. Please try again.")
 
         # Deactivate any existing active plans for this user (part of the same transaction)
         db.query(WorkoutPlan).filter(
@@ -3426,7 +3426,7 @@ Return ONLY valid JSON (no markdown, no code fences):
     except Exception as e:
         db.rollback()
         print("/workout-plans/generate error:", e)
-        raise HTTPException(status_code=500, detail="An internal error occurred")
+        raise HTTPException(status_code=500, detail="Something went wrong. Please try again.")
 
 
 # ============================================================
