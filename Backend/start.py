@@ -31,6 +31,10 @@ def ensure_columns():
                 print("[STARTUP] Adding is_premium to users...", flush=True)
                 conn.execute(text("ALTER TABLE users ADD COLUMN is_premium INTEGER DEFAULT 1"))
 
+            if "learned_neat" not in user_cols:
+                print("[STARTUP] Adding learned_neat to users...", flush=True)
+                conn.execute(text("ALTER TABLE users ADD COLUMN learned_neat FLOAT"))
+
             conn.commit()
 
         # Check food_logs table columns
@@ -65,6 +69,13 @@ def ensure_columns():
                 )
             """))
             conn.execute(text("CREATE INDEX ix_ani_recalibrations_user_id ON ani_recalibrations (user_id)"))
+            conn.commit()
+
+        if insp.has_table("ani_recalibrations"):
+            recal_cols = {c["name"] for c in insp.get_columns("ani_recalibrations")}
+            if "neat_estimate" not in recal_cols:
+                print("[STARTUP] Adding neat_estimate to ani_recalibrations...", flush=True)
+                conn.execute(text("ALTER TABLE ani_recalibrations ADD COLUMN neat_estimate FLOAT"))
             conn.commit()
 
         if not insp.has_table("ani_insights"):

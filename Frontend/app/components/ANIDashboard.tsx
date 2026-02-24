@@ -1,6 +1,24 @@
 "use client";
 import { useState } from "react";
-import { Brain, TrendingUp, TrendingDown, Minus, Lightbulb, Trophy, AlertTriangle, Sparkles, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
+import {
+  Brain,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  Lightbulb,
+  Trophy,
+  AlertTriangle,
+  Sparkles,
+  ChevronDown,
+  ChevronUp,
+  RefreshCw,
+  Scale,
+  Flame,
+  Activity,
+  CheckCircle,
+  Info,
+  Target,
+} from "lucide-react";
 import type { ANITargets, RecalibrationRecord, Insight } from "../hooks/useANI";
 
 interface ANIDashboardProps {
@@ -11,6 +29,8 @@ interface ANIDashboardProps {
   recalError: string;
   onRecalibrate: () => void;
 }
+
+/* ─── Helpers (preserved) ─── */
 
 function DeltaBadge({ current, previous, unit }: { current: number; previous: number; unit: string }) {
   const delta = current - previous;
@@ -52,11 +72,92 @@ function daysAgo(dateStr: string): string {
   return `${diff} days ago`;
 }
 
+/* ─── Weight trend signal display config ─── */
+
+type WeightTrendSignal = NonNullable<ANITargets["weight_trend_signal"]>;
+
+interface SignalDisplay {
+  icon: React.ReactNode;
+  message: string;
+  gradientFrom: string;
+  gradientTo: string;
+  borderColor: string;
+  textColor: string;
+}
+
+function getSignalDisplay(signal: WeightTrendSignal): SignalDisplay {
+  switch (signal) {
+    case "on_track":
+      return {
+        icon: <CheckCircle className="w-6 h-6 text-green-600" />,
+        message: "Your weight is moving in the right direction",
+        gradientFrom: "from-green-50",
+        gradientTo: "to-emerald-50",
+        borderColor: "border-green-200",
+        textColor: "text-green-800",
+      };
+    case "too_fast":
+      return {
+        icon: <Info className="w-6 h-6 text-amber-600" />,
+        message: "Losing a bit quickly \u2014 ANI adjusted to protect your progress",
+        gradientFrom: "from-amber-50",
+        gradientTo: "to-yellow-50",
+        borderColor: "border-amber-200",
+        textColor: "text-amber-800",
+      };
+    case "too_slow":
+      return {
+        icon: <Info className="w-6 h-6 text-amber-600" />,
+        message: "Progress is slower than expected \u2014 ANI is fine-tuning",
+        gradientFrom: "from-amber-50",
+        gradientTo: "to-yellow-50",
+        borderColor: "border-amber-200",
+        textColor: "text-amber-800",
+      };
+    case "wrong_direction":
+      return {
+        icon: <AlertTriangle className="w-6 h-6 text-amber-600" />,
+        message: "Weight trend doesn\u2019t match your goal \u2014 ANI is adjusting",
+        gradientFrom: "from-amber-50",
+        gradientTo: "to-orange-50",
+        borderColor: "border-amber-200",
+        textColor: "text-amber-800",
+      };
+    case "noisy_fallback":
+      return {
+        icon: <Info className="w-6 h-6 text-blue-500" />,
+        message: "This week\u2019s data was noisy \u2014 ANI used your 30-day trend",
+        gradientFrom: "from-blue-50",
+        gradientTo: "to-sky-50",
+        borderColor: "border-blue-200",
+        textColor: "text-blue-800",
+      };
+    case "no_data":
+    default:
+      return {
+        icon: <Scale className="w-6 h-6 text-gray-400" />,
+        message: "Log your weight to unlock smarter adjustments",
+        gradientFrom: "from-gray-50",
+        gradientTo: "to-gray-100",
+        borderColor: "border-gray-200",
+        textColor: "text-gray-600",
+      };
+  }
+}
+
+function signalUsedLabel(signal: ANITargets["signal_used"]): string | null {
+  if (signal === "weight_7d") return "7-day";
+  if (signal === "weight_30d") return "30-day";
+  return null;
+}
+
+/* ─── Main component ─── */
+
 export default function ANIDashboard({ targets, history, insights, recalibrating, recalError, onRecalibrate }: ANIDashboardProps) {
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const latestRecal = history.length > 0 ? history[0] : null;
 
-  // First-visit explainer
+  // First-visit explainer (unchanged)
   if (!targets || !targets.ani_active) {
     return (
       <section className="px-5 mt-4">
@@ -101,15 +202,121 @@ export default function ANIDashboard({ targets, history, insights, recalibrating
   }
 
   const canRecalibrate = targets.days_until_next === 0;
+  const weightSignal = targets.weight_trend_signal ?? "no_data";
+  const signalDisplay = getSignalDisplay(weightSignal);
+  const signalBadge = signalUsedLabel(targets.signal_used ?? null);
 
   return (
     <div className="space-y-4">
-      {/* Current Targets Card */}
+
+      {/* ─── 1. Weight Trend Signal Card (PRIMARY) ─── */}
+      <section className="px-5">
+        <div className={`bg-gradient-to-br ${signalDisplay.gradientFrom} ${signalDisplay.gradientTo} border ${signalDisplay.borderColor} rounded-2xl shadow-sm p-5`}>
+          <div className="flex items-start gap-3">
+            <div className="flex-shrink-0 mt-0.5">{signalDisplay.icon}</div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-base font-bold text-gray-900">Weight Trend</h2>
+                {signalBadge && (
+                  <span className="text-[10px] font-semibold uppercase tracking-wide bg-white/80 text-gray-500 border border-gray-200 rounded-full px-2 py-0.5">
+                    {signalBadge}
+                  </span>
+                )}
+              </div>
+              <p className={`text-sm mt-1 leading-relaxed ${signalDisplay.textColor}`}>
+                {signalDisplay.message}
+              </p>
+              {targets.weight_delta != null && targets.weight_delta !== 0 && (
+                <p className="text-sm font-semibold text-gray-800 mt-2">
+                  {targets.weight_delta > 0 ? "+" : ""}
+                  {targets.weight_delta.toFixed(1)} lbs
+                  {targets.signal_used === "weight_30d" ? "/week (30-day trend)" : " this week"}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── 2. Energy Balance Card (SECONDARY) ─── */}
+      {(targets.avg_calories != null || targets.calories_out != null) && (
+        <section className="px-5">
+          <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-5">
+            <div className="flex items-center gap-2 mb-1">
+              <Activity className="w-5 h-5 text-amber-600" />
+              <h2 className="text-base font-bold text-gray-900">Energy Balance</h2>
+            </div>
+            <p className="text-xs text-gray-500 mb-3">How your eating compares to what your body burns.</p>
+
+            {/* Two-column: Calories In / Calories Out */}
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div className="bg-amber-50 rounded-xl p-3 text-center">
+                <p className="text-xs text-gray-500 mb-0.5">Calories In</p>
+                <p className="text-lg font-bold text-amber-700">
+                  {targets.avg_calories != null ? Math.round(targets.avg_calories) : "\u2014"}
+                </p>
+                <p className="text-[10px] text-gray-400">avg / day</p>
+              </div>
+              <div className="bg-orange-50 rounded-xl p-3 text-center">
+                <p className="text-xs text-gray-500 mb-0.5">Calories Out</p>
+                <p className="text-lg font-bold text-orange-600">
+                  {targets.calories_out != null ? Math.round(targets.calories_out) : "\u2014"}
+                </p>
+                <p className="text-[10px] text-gray-400">daily burn + exercise</p>
+              </div>
+            </div>
+
+            {/* Net balance */}
+            {targets.net_balance != null && (
+              <div className={`flex items-center justify-center gap-2 rounded-xl py-2 px-3 mb-3 ${
+                targets.net_balance < 0 ? "bg-green-50" : targets.net_balance > 0 ? "bg-red-50" : "bg-gray-50"
+              }`}>
+                {targets.net_balance < 0 ? (
+                  <TrendingDown className="w-4 h-4 text-green-600" />
+                ) : targets.net_balance > 0 ? (
+                  <TrendingUp className="w-4 h-4 text-red-500" />
+                ) : (
+                  <Minus className="w-4 h-4 text-gray-400" />
+                )}
+                <span className={`text-sm font-semibold ${
+                  targets.net_balance < 0 ? "text-green-700" : targets.net_balance > 0 ? "text-red-600" : "text-gray-500"
+                }`}>
+                  {targets.net_balance > 0 ? "+" : ""}{Math.round(targets.net_balance)} kcal/day net
+                </span>
+              </div>
+            )}
+
+            {/* NEAT estimate */}
+            {targets.neat_estimate != null && (
+              <p className="text-xs text-gray-400 mb-2">
+                <Flame className="w-3 h-3 inline-block mr-1 text-orange-400 relative -top-[1px]" />
+                Estimated daily burn (before workouts): {Math.round(targets.neat_estimate)} kcal
+              </p>
+            )}
+
+            {/* Energy balance agreement */}
+            {targets.energy_balance_agrees === true && (
+              <div className="flex items-center gap-2 bg-green-50 border border-green-100 rounded-xl py-2 px-3">
+                <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
+                <p className="text-xs text-green-700">Your logging and weight trend agree</p>
+              </div>
+            )}
+            {targets.energy_balance_agrees === false && (
+              <div className="flex items-center gap-2 bg-amber-50 border border-amber-100 rounded-xl py-2 px-3">
+                <Info className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                <p className="text-xs text-amber-700">Your logged intake and weight trend don&rsquo;t quite match &mdash; that&rsquo;s normal. ANI uses the scale as the final word.</p>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* ─── 3. ANI Targets Card ─── */}
       <section className="px-5">
         <div className="bg-gradient-to-br from-amber-50 to-yellow-50 border border-amber-200 rounded-2xl shadow-sm p-5">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-2">
-              <Brain className="w-5 h-5 text-amber-600" />
+              <Target className="w-5 h-5 text-amber-600" />
               <h2 className="text-base font-bold text-amber-900">ANI Targets</h2>
             </div>
             {targets.last_recalibrated && (
@@ -118,38 +325,41 @@ export default function ANIDashboard({ targets, history, insights, recalibrating
               </span>
             )}
           </div>
+          <p className="text-xs text-gray-500 mb-3">
+            These are your current targets. Being close is good enough &mdash; it&rsquo;s the trend that matters.
+          </p>
 
           <div className="grid grid-cols-2 gap-2 mb-4">
             {[
               {
                 label: "Calories",
-                value: `${targets.calorie_goal} kcal`,
+                value: `${targets.calorie_goal ?? 0} kcal`,
                 prev: latestRecal?.prev_goals.calorie_goal,
-                current: targets.calorie_goal!,
+                current: targets.calorie_goal ?? 0,
                 unit: " kcal",
                 color: "text-amber-700",
               },
               {
                 label: "Protein",
-                value: `${targets.protein_goal}g`,
+                value: `${targets.protein_goal ?? 0}g`,
                 prev: latestRecal?.prev_goals.protein_goal,
-                current: targets.protein_goal!,
+                current: targets.protein_goal ?? 0,
                 unit: "g",
                 color: "text-blue-600",
               },
               {
                 label: "Carbs",
-                value: `${targets.carbs_goal}g`,
+                value: `${targets.carbs_goal ?? 0}g`,
                 prev: latestRecal?.prev_goals.carbs_goal,
-                current: targets.carbs_goal!,
+                current: targets.carbs_goal ?? 0,
                 unit: "g",
                 color: "text-amber-600",
               },
               {
                 label: "Fat",
-                value: `${targets.fat_goal}g`,
+                value: `${targets.fat_goal ?? 0}g`,
                 prev: latestRecal?.prev_goals.fat_goal,
-                current: targets.fat_goal!,
+                current: targets.fat_goal ?? 0,
                 unit: "g",
                 color: "text-orange-600",
               },
@@ -184,11 +394,14 @@ export default function ANIDashboard({ targets, history, insights, recalibrating
         </div>
       </section>
 
-      {/* Recalibration Summary Card */}
+      {/* ─── 4. How ANI Made This Call ─── */}
       {latestRecal && (
         <section className="px-5">
           <div className="bg-white rounded-2xl shadow-sm p-5">
-            <h2 className="text-base font-bold text-amber-900 mb-2">Latest Analysis</h2>
+            <div className="flex items-center gap-2 mb-2">
+              <Brain className="w-5 h-5 text-amber-600" />
+              <h2 className="text-base font-bold text-amber-900">How ANI Made This Call</h2>
+            </div>
             <p className="text-sm text-gray-600 leading-relaxed">{latestRecal.reasoning}</p>
 
             <div className="mt-4 grid grid-cols-2 gap-2">
@@ -227,7 +440,7 @@ export default function ANIDashboard({ targets, history, insights, recalibrating
         </section>
       )}
 
-      {/* Insight Feed */}
+      {/* ─── 5. Insight Feed ─── */}
       {insights.length > 0 && (
         <section className="px-5">
           <div className="bg-white rounded-2xl shadow-sm p-5">
@@ -250,7 +463,7 @@ export default function ANIDashboard({ targets, history, insights, recalibrating
         </section>
       )}
 
-      {/* History Section */}
+      {/* ─── 6. History Section ─── */}
       {history.length > 1 && (
         <section className="px-5">
           <div className="bg-white rounded-2xl shadow-sm p-5">
@@ -275,6 +488,12 @@ export default function ANIDashboard({ targets, history, insights, recalibrating
                       <span>Cal: {recal.prev_goals.calorie_goal} &rarr; {recal.new_goals.calorie_goal}</span>
                       <span>Pro: {recal.prev_goals.protein_goal} &rarr; {recal.new_goals.protein_goal}g</span>
                     </div>
+                    {recal.analysis?.signal_used && (
+                      <p className="text-[10px] text-gray-400 mt-1">
+                        Signal: {recal.analysis.signal_used === "weight_7d" ? "7-day weight" : recal.analysis.signal_used === "weight_30d" ? "30-day weight" : "calories only"}
+                        {recal.analysis.weight_delta != null && ` | \u0394 ${recal.analysis.weight_delta > 0 ? "+" : ""}${recal.analysis.weight_delta.toFixed(1)} lbs`}
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -282,6 +501,15 @@ export default function ANIDashboard({ targets, history, insights, recalibrating
           </div>
         </section>
       )}
+
+      {/* ─── 7. Philosophy Footer ─── */}
+      <section className="px-5 pb-2">
+        <p className="text-xs text-gray-400 text-center leading-relaxed">
+          ANI isn&rsquo;t about hitting exact numbers. It&rsquo;s about whether your weight is
+          moving in the right direction at the right pace. Being close is good enough when the
+          scale agrees.
+        </p>
+      </section>
     </div>
   );
 }

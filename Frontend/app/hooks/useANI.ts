@@ -13,6 +13,16 @@ interface ANITargets {
   reasoning?: string;
   days_until_next: number;
   last_recalibrated?: string;
+  // Three-signal data
+  neat_estimate?: number | null;
+  weight_trend_signal?: "on_track" | "too_fast" | "too_slow" | "wrong_direction" | "noisy_fallback" | "no_data" | null;
+  weight_delta?: number | null;
+  calories_out?: number | null;
+  net_balance?: number | null;
+  energy_balance_agrees?: boolean | null;
+  signal_used?: "weight_7d" | "weight_30d" | "calories_only" | null;
+  avg_calories?: number | null;
+  avg_expenditure?: number | null;
 }
 
 interface RecalibrationGoals {
@@ -30,6 +40,17 @@ interface RecalibrationRecord {
   prev_goals: RecalibrationGoals;
   new_goals: RecalibrationGoals;
   reasoning: string;
+  analysis?: {
+    weight_trend_signal?: string;
+    weight_delta?: number | null;
+    neat_estimate?: number | null;
+    calories_out?: number | null;
+    net_balance?: number | null;
+    energy_balance_agrees?: boolean | null;
+    signal_used?: string;
+    avg_calories?: number | null;
+    [key: string]: any;
+  } | null;
 }
 
 interface Insight {

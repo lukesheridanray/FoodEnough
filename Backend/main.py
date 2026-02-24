@@ -96,6 +96,7 @@ class User(Base):
     height_cm = Column(Float, nullable=True)
     activity_level = Column(String, nullable=True)  # 'sedentary','light','moderate','active','very_active'
     goal_type = Column(String, nullable=True)        # 'lose', 'maintain', 'gain'
+    learned_neat = Column(Float, nullable=True)  # ANI's learned NEAT estimate (kcal/day), updated over time
     is_verified = Column(Integer, default=0)           # 0 = unverified, 1 = verified
     verification_token = Column(String, nullable=True)
     is_premium = Column(Integer, default=1)              # 0 = free, 1 = premium (default true for testing)
@@ -219,6 +220,7 @@ class ANIRecalibration(Base):
     new_carbs_goal = Column(Integer, nullable=False)
     new_fat_goal = Column(Integer, nullable=False)
     analysis_json = Column(Text, nullable=True)
+    neat_estimate = Column(Float, nullable=True)  # NEAT estimate used for this recalibration (kcal/day)
     reasoning = Column(Text, nullable=False)
     user = relationship("User", back_populates="ani_recalibrations")
 
@@ -495,31 +497,57 @@ def calculate_nutrition_goals(
 # Workout Calorie Estimation (MET-based)
 # ============================================================
 _EXERCISE_MET: dict = {
-    # Compound barbell
+    # Compound barbell — core strength
     "squat": 6.0, "back squat": 6.0, "front squat": 6.0, "goblet squat": 5.0,
+    "overhead squat": 6.0, "zercher squat": 5.5,
     "deadlift": 6.0, "romanian deadlift": 5.0, "sumo deadlift": 6.0,
+    "stiff leg deadlift": 5.0, "deficit deadlift": 6.5, "trap bar deadlift": 6.0,
     "bench press": 5.0, "incline bench press": 5.0, "decline bench press": 5.0,
+    "close grip bench press": 5.0, "floor press": 4.5,
     "overhead press": 5.0, "military press": 5.0, "push press": 5.5,
+    "strict press": 5.0, "push jerk": 6.0, "split jerk": 6.0,
     "barbell row": 5.0, "bent over row": 5.0, "pendlay row": 5.0,
-    "clean": 6.0, "power clean": 6.0, "clean and jerk": 6.5, "snatch": 6.5,
+    "clean": 6.0, "power clean": 6.0, "hang clean": 5.5, "squat clean": 6.5,
+    "clean and jerk": 6.5, "snatch": 6.5, "power snatch": 6.0, "hang snatch": 6.0,
+    "clean pull": 5.5, "snatch pull": 5.5,
     "hip thrust": 5.0, "barbell hip thrust": 5.0,
-    # Dumbbell / cable isolation
+    "good morning": 4.5, "barbell lunge": 5.5, "barbell step up": 5.0,
+    # Dumbbell / cable
+    "dumbbell bench press": 5.0, "dumbbell shoulder press": 4.5,
+    "dumbbell row": 4.5, "dumbbell snatch": 5.5, "dumbbell thruster": 6.0,
     "dumbbell curl": 3.5, "bicep curl": 3.5, "hammer curl": 3.5,
     "tricep pushdown": 3.5, "tricep extension": 3.5, "skull crusher": 3.5,
     "lateral raise": 3.0, "front raise": 3.0, "rear delt fly": 3.0,
     "face pull": 3.0, "cable fly": 3.5, "chest fly": 3.5,
+    "dumbbell fly": 3.5, "cable crossover": 3.5,
     "leg curl": 4.0, "leg extension": 4.0, "calf raise": 3.0,
-    "leg press": 5.0,
+    "leg press": 5.0, "hack squat": 5.0,
     # Bodyweight
     "push up": 4.0, "pushup": 4.0, "pull up": 5.0, "pullup": 5.0,
-    "chin up": 5.0, "dip": 5.0, "lunge": 5.0, "walking lunge": 5.0,
+    "chin up": 5.0, "dip": 5.0, "ring dip": 5.5, "bar muscle up": 7.0,
+    "ring muscle up": 7.0, "muscle up": 7.0,
+    "lunge": 5.0, "walking lunge": 5.0, "pistol squat": 5.5,
     "burpee": 8.0, "mountain climber": 8.0, "plank": 3.0,
+    "handstand push up": 5.5, "strict toes to bar": 4.5, "toes to bar": 5.0,
+    "knees to elbow": 4.0, "sit up": 3.5, "ghd sit up": 4.5,
+    "air squat": 4.0, "hollow hold": 3.5, "l-sit": 3.5,
     # Machine
     "lat pulldown": 4.5, "seated row": 4.5, "cable row": 4.5,
-    "chest press": 4.5, "shoulder press machine": 4.0,
-    # Cardio-style
-    "kettlebell swing": 6.0, "battle rope": 8.0, "box jump": 7.0,
-    "jumping jack": 7.0, "jump rope": 8.0,
+    "chest press machine": 4.5, "shoulder press machine": 4.0,
+    # Conditioning / HYROX / CrossFit
+    "kettlebell swing": 6.0, "kettlebell clean": 5.5, "kettlebell snatch": 6.0,
+    "turkish get up": 5.0, "farmers carry": 5.5, "farmers walk": 5.5,
+    "sled push": 8.0, "sled pull": 7.0, "prowler push": 8.0,
+    "wall ball": 6.5, "ball slam": 6.0, "med ball clean": 5.5,
+    "battle rope": 8.0, "box jump": 7.0, "box step up": 5.0,
+    "jumping jack": 7.0, "jump rope": 8.0, "double under": 9.0,
+    "rowing": 7.0, "ski erg": 7.0, "assault bike": 8.5, "echo bike": 8.5,
+    "thruster": 6.5, "barbell thruster": 6.5, "cluster": 6.5,
+    "sandbag carry": 5.5, "sandbag clean": 5.5, "sandbag over shoulder": 6.0,
+    "rope climb": 7.0, "bear crawl": 7.0, "broad jump": 6.5,
+    "devil press": 7.0, "man maker": 7.5,
+    # Running
+    "run": 8.0, "sprint": 10.0, "shuttle run": 8.5,
 }
 _DEFAULT_MET = 4.0  # generic strength training
 _SECONDS_PER_REP = 3.5  # average time under tension per rep
@@ -603,11 +631,21 @@ def run_recalibration(
     plan_sessions: list,
     current_goals: dict,
     health_metrics: list = None,
+    weight_entries_30d: list = None,
+    db=None,
 ) -> dict:
     """
-    Analyze 7 days of data and return adjusted goals.
+    Three-signal recalibration engine.
+
+    Signal 1 (PRIMARY):   Weight trend — the scale is ground truth.
+    Signal 2 (SECONDARY): Calorie expenditure — NEAT + workout burn.
+    Signal 3 (SUPPORTING): Logged calories & macros — cross-referenced
+                           against weight trend for validation.
+
     Returns: { new_goals: dict, analysis: dict, reasoning: str, insights: list }
     """
+    import json as _json
+    import statistics
     from collections import defaultdict
 
     prev_cal = current_goals["calorie_goal"]
@@ -616,7 +654,9 @@ def run_recalibration(
     prev_fat = current_goals["fat_goal"]
     goal_type = user.goal_type or "maintain"
 
-    # 1. Aggregate daily averages from food logs
+    # ------------------------------------------------------------------
+    # Aggregate daily averages from food logs
+    # ------------------------------------------------------------------
     daily: dict = defaultdict(lambda: {"cal": 0.0, "pro": 0.0, "carbs": 0.0, "fat": 0.0})
     for log in food_logs:
         day_key = log.timestamp.strftime("%Y-%m-%d")
@@ -649,18 +689,223 @@ def run_recalibration(
     weekend_pro_avg = sum(weekend_pro_total.values()) / max(len(weekend_pro_total), 1)
     weekday_pro_avg = sum(weekday_pro_total.values()) / max(len(weekday_pro_total), 1)
 
-    # 2. Compute weight trend
+    # ==================================================================
+    # SIGNAL 1 — Weight Trend (PRIMARY, highest authority)
+    # ==================================================================
     weight_delta = None
+    weight_trend_signal = "no_data"
+    signal_used = "calories_only"
+    is_noisy_week = False
+
     if len(weight_entries) >= 2:
         sorted_weights = sorted(weight_entries, key=lambda w: w.timestamp)
+        weight_values = [w.weight_lbs for w in sorted_weights]
         weight_delta = sorted_weights[-1].weight_lbs - sorted_weights[0].weight_lbs
 
-    # 3. Compute workout adherence
+        # Noisy data detection: std dev > 2.0 lbs or < 2 entries
+        if len(weight_values) >= 2:
+            weight_std = statistics.stdev(weight_values)
+            is_noisy_week = weight_std > 2.0
+        else:
+            is_noisy_week = True
+
+        if not is_noisy_week:
+            signal_used = "weight_7d"
+        else:
+            # Fall back to 30-day trend if weekly data is noisy
+            if weight_entries_30d and len(weight_entries_30d) >= 2:
+                sorted_30d = sorted(weight_entries_30d, key=lambda w: w.timestamp)
+                weight_delta = sorted_30d[-1].weight_lbs - sorted_30d[0].weight_lbs
+                # Normalise 30-day delta to a per-week rate for consistent thresholds
+                days_span = max((sorted_30d[-1].timestamp - sorted_30d[0].timestamp).days, 1)
+                weight_delta = weight_delta * 7.0 / days_span
+                signal_used = "weight_30d"
+                weight_trend_signal = "noisy_fallback"
+            else:
+                signal_used = "calories_only"
+                weight_delta = None
+    elif weight_entries_30d and len(weight_entries_30d) >= 2:
+        # Fewer than 2 weekly entries — try 30-day fallback
+        sorted_30d = sorted(weight_entries_30d, key=lambda w: w.timestamp)
+        weight_delta = sorted_30d[-1].weight_lbs - sorted_30d[0].weight_lbs
+        days_span = max((sorted_30d[-1].timestamp - sorted_30d[0].timestamp).days, 1)
+        weight_delta = weight_delta * 7.0 / days_span
+        signal_used = "weight_30d"
+        weight_trend_signal = "noisy_fallback"
+
+    # Classify the weight trend signal (if we have usable weight data)
+    if weight_delta is not None and weight_trend_signal != "noisy_fallback":
+        if goal_type == "lose":
+            if -2 <= weight_delta <= -0.5:
+                weight_trend_signal = "on_track"
+            elif weight_delta < -2:
+                weight_trend_signal = "too_fast"
+            elif -0.5 < weight_delta <= 0:
+                weight_trend_signal = "too_slow"
+            else:
+                weight_trend_signal = "wrong_direction"
+        elif goal_type == "gain":
+            if 0.25 <= weight_delta <= 1.0:
+                weight_trend_signal = "on_track"
+            elif weight_delta > 1.0:
+                weight_trend_signal = "too_fast"
+            elif 0 < weight_delta < 0.25:
+                weight_trend_signal = "too_slow"
+            else:
+                weight_trend_signal = "wrong_direction"
+        else:  # maintain
+            if abs(weight_delta) < 0.5:
+                weight_trend_signal = "on_track"
+            elif weight_delta < -1:
+                weight_trend_signal = "too_fast"  # losing when should maintain
+            elif weight_delta > 1:
+                weight_trend_signal = "too_slow"  # gaining when should maintain
+            else:
+                weight_trend_signal = "on_track"  # within acceptable range
+    elif weight_delta is None:
+        weight_trend_signal = "no_data"
+
+    # ==================================================================
+    # SIGNAL 2 — Calorie Expenditure (SECONDARY)
+    # ==================================================================
+    neat_estimate = None
+    calories_out = None
+    estimated_tdee = None
+    avg_workout_cal = 0.0
+    avg_expenditure = None
+    expenditure_vs_estimate = None
+
+    # 2a. Calculate NEAT baseline (Mifflin-St Jeor) or use learned_neat
+    latest_weight_lbs = None
+    if weight_entries:
+        latest_weight_lbs = sorted(weight_entries, key=lambda w: w.timestamp)[-1].weight_lbs
+    elif weight_entries_30d:
+        latest_weight_lbs = sorted(weight_entries_30d, key=lambda w: w.timestamp)[-1].weight_lbs
+
+    if user.learned_neat:
+        neat_estimate = user.learned_neat
+    elif user.height_cm and user.age and user.sex and user.activity_level and latest_weight_lbs:
+        est_goals = calculate_nutrition_goals(
+            weight_lbs=latest_weight_lbs,
+            height_cm=user.height_cm,
+            age=user.age,
+            sex=user.sex,
+            activity_level=user.activity_level,
+            goal="maintain",
+        )
+        neat_estimate = est_goals["tdee"]
+        estimated_tdee = est_goals["tdee"]
+
+    # 2b. Compute average daily workout calories from completed plan sessions
+    if plan_sessions and latest_weight_lbs:
+        weight_kg = latest_weight_lbs * 0.453592
+        total_workout_cal = 0.0
+        completed_count = 0
+        for sess in plan_sessions:
+            if sess.is_completed and sess.exercises_json:
+                try:
+                    exercises = _json.loads(sess.exercises_json)
+                    result_wk = estimate_workout_calories(exercises, weight_kg)
+                    total_workout_cal += result_wk["estimated_calories"]
+                    completed_count += 1
+                except Exception:
+                    pass
+        if completed_count > 0:
+            # Spread total workout calories across 7 days for a daily average
+            avg_workout_cal = total_workout_cal / 7.0
+
+    # 2c. Pull real burn data from health_metrics if available
+    has_real_expenditure = False
+    if health_metrics:
+        expenditure_values = [m.total_expenditure for m in health_metrics if m.total_expenditure is not None]
+        if len(expenditure_values) >= 3:
+            avg_expenditure = sum(expenditure_values) / len(expenditure_values)
+            has_real_expenditure = True
+            # If we have real expenditure data, use it directly as calories_out
+            calories_out = avg_expenditure
+
+    # If no real expenditure data, compute calories_out from NEAT + workout
+    if not has_real_expenditure and neat_estimate:
+        calories_out = neat_estimate + avg_workout_cal
+
+    # 2d. Learn the user's actual NEAT by reconciling calories vs weight change
+    if (
+        weight_delta is not None
+        and avg_cal > 0
+        and days_logged >= 5
+        and signal_used in ("weight_7d", "weight_30d")
+    ):
+        # actual_weight_delta_per_day in lbs (weight_delta is already per-week)
+        actual_delta_per_day = weight_delta / 7.0
+        # 1 lb of body weight ~ 3500 kcal
+        implied_daily_surplus = actual_delta_per_day * 3500.0
+        # learned_neat = avg_calories_in - implied_daily_surplus
+        calculated_neat = avg_cal - implied_daily_surplus
+
+        if calculated_neat > 800:  # sanity: NEAT shouldn't be absurdly low
+            previous_neat = user.learned_neat if user.learned_neat else (neat_estimate or calculated_neat)
+            new_learned_neat = 0.7 * previous_neat + 0.3 * calculated_neat
+
+            # Persist learned NEAT on user if db is available
+            if db is not None:
+                try:
+                    user.learned_neat = round(new_learned_neat, 1)
+                    db.add(user)
+                    db.flush()
+                except Exception:
+                    pass  # don't break recalibration if persist fails
+
+            # Use the freshly learned NEAT for this recalibration
+            neat_estimate = new_learned_neat
+            if not has_real_expenditure:
+                calories_out = neat_estimate + avg_workout_cal
+
+    # Also compute estimated_tdee for expenditure_vs_estimate comparison
+    if estimated_tdee is None and user.height_cm and user.age and user.sex and user.activity_level and latest_weight_lbs:
+        est_goals = calculate_nutrition_goals(
+            weight_lbs=latest_weight_lbs,
+            height_cm=user.height_cm,
+            age=user.age,
+            sex=user.sex,
+            activity_level=user.activity_level,
+            goal="maintain",
+        )
+        estimated_tdee = est_goals["tdee"]
+
+    if avg_expenditure and estimated_tdee:
+        expenditure_vs_estimate = avg_expenditure - estimated_tdee
+
+    # ==================================================================
+    # SIGNAL 3 — Logged Calories & Macros (SUPPORTING)
+    # ==================================================================
+    net_balance = None
+    energy_balance_agrees = None
+
+    if calories_out and avg_cal > 0:
+        net_balance = avg_cal - calories_out
+
+        # Cross-reference net balance against weight trend
+        if weight_delta is not None:
+            if goal_type == "lose":
+                # Both should indicate deficit (net_balance < 0, weight_delta < 0)
+                energy_balance_agrees = (net_balance < 0 and weight_delta < 0)
+            elif goal_type == "gain":
+                # Both should indicate surplus (net_balance > 0, weight_delta > 0)
+                energy_balance_agrees = (net_balance > 0 and weight_delta > 0)
+            else:  # maintain
+                # Both should be roughly neutral
+                energy_balance_agrees = (abs(net_balance) < 300 and abs(weight_delta) < 1.0)
+
+    # ------------------------------------------------------------------
+    # Compute workout adherence
+    # ------------------------------------------------------------------
     total_planned = len(plan_sessions)
     completed_sessions = sum(1 for s in plan_sessions if s.is_completed)
     workout_adherence = completed_sessions / max(total_planned, 1)
 
-    # 4. Detect patterns
+    # ------------------------------------------------------------------
+    # Detect patterns
+    # ------------------------------------------------------------------
     patterns = []
     weekend_protein_dip = (
         weekday_pro_avg > 0
@@ -677,103 +922,250 @@ def run_recalibration(
     if consistent_over:
         patterns.append("consistent_over_eating")
 
-    # 5. Apply adjustment rules
+    # ==================================================================
+    # Apply adjustment rules — weight trend drives the decision
+    # ==================================================================
     new_cal = float(prev_cal)
     new_pro = float(prev_pro)
     reasoning_parts = []
     insights = []
 
+    # ------- Weight-driven adjustments (Signal 1 — PRIMARY) -------
     if weight_delta is not None:
         if goal_type == "lose":
-            if weight_delta < -3:
-                # Losing too fast
+            if weight_trend_signal == "too_fast":
+                # Losing too fast — raise calories even if user hit target
                 new_cal *= 1.05
                 reasoning_parts.append(
-                    f"You lost {abs(round(weight_delta, 1))} lbs this week, which is faster than recommended. "
-                    f"Raising your calorie target by 5% to slow the rate of loss and preserve muscle."
+                    f"You lost {abs(round(weight_delta, 1))} lbs this week — that's faster than the safe range of 0.5-2 lbs. "
+                    f"ANI is raising your calorie target by 5% to protect your muscle and energy levels. "
+                    f"You're making great progress; let's just make sure it's sustainable."
                 )
                 insights.append({
                     "type": "warning",
-                    "title": "Rapid weight loss detected",
-                    "body": f"You lost {abs(round(weight_delta, 1))} lbs this week. A safe rate is 0.5-2 lbs/week. "
-                            f"Your calorie target has been increased slightly to protect muscle mass.",
+                    "title": "Losing a bit too quickly",
+                    "body": f"You lost {abs(round(weight_delta, 1))} lbs this week. That's impressive dedication, but the sweet spot "
+                            f"is 0.5-2 lbs/week for preserving muscle. Your calorie target has been nudged up slightly — "
+                            f"you're still on the right path.",
                 })
-            elif -2 <= weight_delta <= -0.5:
+            elif weight_trend_signal == "on_track":
                 reasoning_parts.append(
-                    f"You lost {abs(round(weight_delta, 1))} lbs this week — right on track for healthy fat loss. "
-                    f"Keeping your targets steady."
+                    f"You lost {abs(round(weight_delta, 1))} lbs this week — right in the sweet spot. "
+                    f"Your current targets are working well. No changes needed, just keep doing what you're doing."
                 )
                 insights.append({
                     "type": "achievement",
-                    "title": "On track",
-                    "body": f"Your {abs(round(weight_delta, 1))} lb loss this week is in the ideal range. Keep it up!",
+                    "title": "Right on track",
+                    "body": f"Your {abs(round(weight_delta, 1))} lb loss this week is exactly where ANI wants you. "
+                            f"The scale agrees with your effort — you're doing great!",
                 })
-            elif weight_delta > 0:
+            elif weight_trend_signal == "too_slow":
+                # Scale shows very slow loss — nudge calories down if energy balance disagrees
+                if energy_balance_agrees is False:
+                    new_cal *= 0.97
+                    reasoning_parts.append(
+                        f"Weight moved {abs(round(weight_delta, 1))} lbs this week — slower than expected. The math suggests your actual burn "
+                        f"may be a bit lower than expected. ANI is trimming calories by 3% — small tweak, nothing drastic."
+                    )
+                else:
+                    reasoning_parts.append(
+                        f"Weight change was small this week ({abs(round(weight_delta, 1))} lbs), but your logging and energy balance "
+                        f"look consistent. This could be water retention or normal variance. Holding targets steady for now."
+                    )
+            elif weight_trend_signal == "wrong_direction":
+                # Weight went up during a cut — scale wins
+                if energy_balance_agrees is False and net_balance is not None and net_balance > 0:
+                    new_cal *= 0.95
+                    reasoning_parts.append(
+                        f"Weight went up {round(weight_delta, 1)} lbs while in a cut, and your energy balance suggests a surplus. "
+                        f"ANI is reducing calories by 5%. Don't stress — small adjustments add up over time."
+                    )
+                else:
+                    reasoning_parts.append(
+                        f"Weight went up {round(weight_delta, 1)} lbs while in a cut. This is likely water fluctuation or "
+                        f"timing — your logged intake looks close to target. Holding steady and watching next week."
+                    )
+            elif weight_trend_signal == "noisy_fallback":
                 reasoning_parts.append(
-                    f"Weight went up {round(weight_delta, 1)} lbs while in a cut. This could be water fluctuation. "
-                    f"Holding targets steady — monitor next week."
+                    f"This week's weight data was a bit variable, so ANI used your 30-day trend instead "
+                    f"(~{abs(round(weight_delta, 1))} lbs/week). "
                 )
+                if weight_delta < -2:
+                    new_cal *= 1.05
+                    reasoning_parts.append(
+                        "Your longer-term trend shows faster loss than ideal. Raising calories 5% to keep things sustainable."
+                    )
+                elif -2 <= weight_delta <= -0.5:
+                    reasoning_parts.append(
+                        "The longer-term trend looks solid — you're losing at a healthy pace. Keeping targets steady."
+                    )
+                elif weight_delta > 0:
+                    new_cal *= 0.97
+                    reasoning_parts.append(
+                        "The 30-day trend suggests weight is drifting up. Trimming calories 3% to get back on track."
+                    )
+                else:
+                    reasoning_parts.append(
+                        "Loss is a bit slower than ideal over the longer term. Holding targets for now and watching closely."
+                    )
+
         elif goal_type == "gain":
-            if weight_delta is not None and weight_delta < 0.25:
-                new_cal *= 1.05
+            if weight_trend_signal == "on_track":
                 reasoning_parts.append(
-                    f"Weight change was only {round(weight_delta, 1)} lbs — below the gain target. "
-                    f"Bumping calories by 5% to support your surplus."
-                )
-            elif 0.25 <= (weight_delta or 0) <= 1.0:
-                reasoning_parts.append(
-                    f"You gained {round(weight_delta, 1)} lbs — solid lean-bulk progress. Holding targets steady."
+                    f"You gained {round(weight_delta, 1)} lbs — solid lean-bulk progress. "
+                    f"Your targets are dialed in. Keep fueling those workouts!"
                 )
                 insights.append({
                     "type": "achievement",
                     "title": "Gaining on pace",
-                    "body": f"Your {round(weight_delta, 1)} lb gain is in the ideal range for lean muscle building.",
+                    "body": f"Your {round(weight_delta, 1)} lb gain is in the ideal range for lean muscle building. "
+                            f"The scale and your logging agree — nice work.",
                 })
-            elif (weight_delta or 0) > 1.5:
-                # Gaining too fast — risk of excess fat gain
+            elif weight_trend_signal == "too_slow":
+                new_cal *= 1.05
+                reasoning_parts.append(
+                    f"Weight change was only {round(weight_delta, 1)} lbs — a bit below the gain target. "
+                    f"Bumping calories by 5% to support your surplus. You're close, just need a little more fuel."
+                )
+            elif weight_trend_signal == "too_fast":
                 new_cal *= 0.97
                 reasoning_parts.append(
-                    f"You gained {round(weight_delta, 1)} lbs this week — faster than ideal for lean gains. "
-                    f"Reducing calories by 3% to minimize fat gain while maintaining surplus."
+                    f"You gained {round(weight_delta, 1)} lbs this week — a bit faster than ideal for lean gains. "
+                    f"Reducing calories by 3% to minimize fat gain while keeping the surplus. "
+                    f"You're building well; this just keeps it precise."
                 )
                 insights.append({
                     "type": "warning",
-                    "title": "Gaining too fast",
-                    "body": f"Your {round(weight_delta, 1)} lb gain exceeds the 1-1.5 lb/week target. "
-                            f"A slight calorie reduction will help keep gains lean.",
+                    "title": "Gaining a bit fast",
+                    "body": f"Your {round(weight_delta, 1)} lb gain exceeds the 1-1.5 lb/week sweet spot. "
+                            f"A small calorie trim will help keep your gains lean.",
                 })
-        else:  # maintain
-            if weight_delta is not None and abs(weight_delta) < 0.5:
+            elif weight_trend_signal == "wrong_direction":
+                new_cal *= 1.07
                 reasoning_parts.append(
-                    f"Weight stable at {round(weight_delta, 1)} lbs change — maintenance is on point."
+                    f"Weight dropped {abs(round(weight_delta, 1))} lbs while trying to gain. "
+                    f"ANI is raising calories 7% to get you back into surplus. Let's get that trend moving upward."
+                )
+            elif weight_trend_signal == "noisy_fallback":
+                reasoning_parts.append(
+                    f"This week's weight data was variable, so ANI used your 30-day trend "
+                    f"(~{round(weight_delta, 1)} lbs/week). "
+                )
+                if weight_delta < 0.25:
+                    new_cal *= 1.05
+                    reasoning_parts.append(
+                        "The longer-term trend suggests you need a bit more fuel. Bumping calories 5%."
+                    )
+                elif 0.25 <= weight_delta <= 1.0:
+                    reasoning_parts.append(
+                        "Your 30-day gain rate looks healthy. Holding targets steady."
+                    )
+                elif weight_delta > 1.0:
+                    new_cal *= 0.97
+                    reasoning_parts.append(
+                        "Longer-term trend shows faster gains than ideal. Trimming calories 3% to keep it lean."
+                    )
+
+        else:  # maintain
+            if weight_trend_signal == "on_track":
+                reasoning_parts.append(
+                    f"Weight stable at {round(weight_delta, 1)} lbs change — maintenance is on point. "
+                    f"Your current targets are working well."
                 )
                 insights.append({
                     "type": "achievement",
                     "title": "Maintenance locked in",
-                    "body": "Your weight is holding steady. Your current targets are working well.",
+                    "body": "Your weight is holding steady and the scale agrees with your logging. "
+                            "You've found your balance — that's a real achievement.",
                 })
-            elif weight_delta is not None and weight_delta < -1:
+            elif weight_trend_signal == "too_fast":
+                # Losing when should be maintaining
                 new_cal *= 1.07
                 reasoning_parts.append(
-                    f"You lost {abs(round(weight_delta, 1))} lbs while maintaining — raising calories 7% to stabilize."
+                    f"You lost {abs(round(weight_delta, 1))} lbs while maintaining — raising calories 7% to stabilize. "
+                    f"Your body may need a bit more fuel at your current activity level."
                 )
-            elif weight_delta is not None and weight_delta > 1:
+            elif weight_trend_signal == "too_slow":
+                # Gaining when should be maintaining
                 new_cal *= 0.95
                 reasoning_parts.append(
-                    f"You gained {round(weight_delta, 1)} lbs while maintaining — reducing calories 5% to stabilize."
+                    f"You gained {round(weight_delta, 1)} lbs while maintaining — reducing calories 5% to stabilize. "
+                    f"Small adjustment to get your weight back to steady."
                 )
+            elif weight_trend_signal == "noisy_fallback":
+                reasoning_parts.append(
+                    f"This week's weight data was variable, so ANI used your 30-day trend "
+                    f"(~{round(weight_delta, 1)} lbs/week change). "
+                )
+                if abs(weight_delta) < 0.5:
+                    reasoning_parts.append("Longer-term trend shows stable weight. All good!")
+                elif weight_delta < -1:
+                    new_cal *= 1.07
+                    reasoning_parts.append("30-day trend shows a downward drift. Raising calories 7% to stabilize.")
+                elif weight_delta > 1:
+                    new_cal *= 0.95
+                    reasoning_parts.append("30-day trend shows an upward drift. Reducing calories 5% to stabilize.")
     else:
+        # No weight data at all
         reasoning_parts.append(
-            "Not enough weight data this week to assess trend. "
-            "Log your weight regularly for better recommendations."
+            "ANI didn't have enough weight data this week to assess your trend. "
+            "Logging your weight at least twice a week lets ANI make much better calls for you."
         )
         insights.append({
             "type": "tip",
-            "title": "Log your weight",
-            "body": "Weighing in at least twice a week helps ANI make more accurate adjustments.",
+            "title": "Weigh in to unlock smarter adjustments",
+            "body": "Weighing in at least twice a week gives ANI the ground-truth signal it needs. "
+                    "Even a quick morning weigh-in makes a big difference in accuracy.",
         })
 
-    # Weekend protein dip
+    # ------- Energy balance cross-reference insight (Signal 3) -------
+    if energy_balance_agrees is not None:
+        if energy_balance_agrees:
+            insights.append({
+                "type": "achievement",
+                "title": "Scale and logging agree",
+                "body": "Your logged intake and your weight trend are telling the same story. "
+                        "That's a great sign — your tracking is accurate and your targets are well-calibrated.",
+            })
+        elif energy_balance_agrees is False and weight_delta is not None:
+            insights.append({
+                "type": "pattern",
+                "title": "Scale and logging don't quite match",
+                "body": "Your weight trend and logged calories are pointing in different directions. "
+                        "This is normal — it can be water, sodium, or untracked bites. "
+                        "ANI trusts the scale and will adjust accordingly. More consistent logging helps ANI help you.",
+            })
+
+    # ------- Expenditure insight from health metrics -------
+    if has_real_expenditure and expenditure_vs_estimate is not None and estimated_tdee:
+        if expenditure_vs_estimate > 300:
+            bump = min(expenditure_vs_estimate * 0.30, prev_cal * 0.05)
+            new_cal += bump
+            reasoning_parts.append(
+                f"Your actual daily burn (~{round(avg_expenditure)} kcal) is higher than expected (~{estimated_tdee} kcal). "
+                f"Raising your calorie target to match your actual activity level."
+            )
+            insights.append({
+                "type": "pattern",
+                "title": "Higher actual activity",
+                "body": f"You're burning ~{round(expenditure_vs_estimate)} kcal more per day than your profile suggests. "
+                        f"Your calorie target has been adjusted upward to match.",
+            })
+        elif expenditure_vs_estimate < -200:
+            reduction = min(abs(expenditure_vs_estimate) * 0.30, prev_cal * 0.05)
+            new_cal -= reduction
+            reasoning_parts.append(
+                f"Your actual daily burn (~{round(avg_expenditure)} kcal) is lower than expected (~{estimated_tdee} kcal). "
+                f"Adjusting your calorie target to match your actual activity level."
+            )
+            insights.append({
+                "type": "pattern",
+                "title": "Adjusted for actual activity",
+                "body": f"You're burning ~{round(abs(expenditure_vs_estimate))} kcal less per day than your profile suggests. "
+                        f"Your calorie target has been adjusted to match your actual activity level.",
+            })
+
+    # ------- Weekend protein dip (preserved) -------
     if weekend_protein_dip:
         new_pro *= 1.05
         reasoning_parts.append(
@@ -784,93 +1176,42 @@ def run_recalibration(
             "type": "pattern",
             "title": "Weekend protein dip",
             "body": f"Protein drops on weekends ({round(weekend_pro_avg)}g avg vs {round(weekday_pro_avg)}g weekday). "
-                    f"Try prepping high-protein snacks for the weekend.",
+                    f"Try prepping high-protein snacks for the weekend — small habits go a long way.",
         })
 
-    # Workout adherence
+    # ------- Workout adherence (preserved) -------
     if total_planned > 0 and workout_adherence < 0.5:
         new_cal *= 0.97
         reasoning_parts.append(
-            f"Workout adherence was {round(workout_adherence * 100)}% — reducing calories 3% since activity is lower than planned."
+            f"You completed {completed_sessions} of {total_planned} planned workouts this week. Since actual activity was lighter, ANI is trimming calories 3% to match."
         )
         insights.append({
             "type": "warning",
-            "title": "Low workout adherence",
+            "title": "Fewer workouts this week",
             "body": f"You completed {completed_sessions} of {total_planned} planned sessions. "
-                    f"Calorie target adjusted down to match actual activity level.",
+                    f"Calorie target adjusted down to match actual activity level. "
+                    f"No judgment — life happens. Let's recalibrate and keep moving forward.",
         })
     elif total_planned > 0 and workout_adherence >= 0.8:
         insights.append({
             "type": "achievement",
             "title": "Strong workout consistency",
-            "body": f"You completed {completed_sessions} of {total_planned} sessions ({round(workout_adherence * 100)}%). Great discipline!",
+            "body": f"You completed {completed_sessions} of {total_planned} sessions ({round(workout_adherence * 100)}%). "
+                    f"That kind of consistency is what drives real results. Keep it up!",
         })
 
-    # Expenditure analysis from health metrics
-    avg_expenditure = None
-    expenditure_vs_estimate = None
-    if health_metrics:
-        expenditure_values = [m.total_expenditure for m in health_metrics if m.total_expenditure is not None]
-        if len(expenditure_values) >= 3:
-            avg_expenditure = sum(expenditure_values) / len(expenditure_values)
-
-            # Estimate TDEE from user profile (Mifflin-St Jeor)
-            estimated_tdee = None
-            if user.height_cm and user.age and user.sex and user.activity_level:
-                latest_w = sorted(weight_entries, key=lambda w: w.timestamp)[-1].weight_lbs if weight_entries else None
-                if latest_w:
-                    est_goals = calculate_nutrition_goals(
-                        weight_lbs=latest_w,
-                        height_cm=user.height_cm,
-                        age=user.age,
-                        sex=user.sex,
-                        activity_level=user.activity_level,
-                        goal="maintain",
-                    )
-                    estimated_tdee = est_goals["tdee"]
-
-            if estimated_tdee:
-                expenditure_vs_estimate = avg_expenditure - estimated_tdee
-
-                if expenditure_vs_estimate > 300:
-                    # Actual burn higher than estimated — bump calories
-                    bump = min(expenditure_vs_estimate * 0.30, prev_cal * 0.05)
-                    new_cal += bump
-                    reasoning_parts.append(
-                        f"Your actual calorie burn ({round(avg_expenditure)} kcal/day) exceeds estimated TDEE ({estimated_tdee} kcal) by {round(expenditure_vs_estimate)} kcal. "
-                        f"Raising calorie target by {round(bump)} kcal to fuel your higher activity."
-                    )
-                    insights.append({
-                        "type": "pattern",
-                        "title": "Higher actual activity",
-                        "body": f"You're burning ~{round(expenditure_vs_estimate)} kcal more per day than your profile suggests. "
-                                f"Your calorie target has been adjusted upward.",
-                    })
-                elif expenditure_vs_estimate < -200:
-                    # Actual burn lower than estimated — reduce calories
-                    reduction = min(abs(expenditure_vs_estimate) * 0.30, prev_cal * 0.05)
-                    new_cal -= reduction
-                    reasoning_parts.append(
-                        f"Your actual calorie burn ({round(avg_expenditure)} kcal/day) is below estimated TDEE ({estimated_tdee} kcal) by {round(abs(expenditure_vs_estimate))} kcal. "
-                        f"Reducing calorie target by {round(reduction)} kcal to match actual activity."
-                    )
-                    insights.append({
-                        "type": "pattern",
-                        "title": "Lower actual activity",
-                        "body": f"You're burning ~{round(abs(expenditure_vs_estimate))} kcal less per day than your profile suggests. "
-                                f"Your calorie target has been adjusted downward.",
-                    })
-
-    # Consistent over-eating (non-lose goal)
+    # ------- Consistent over-eating (non-lose goal, preserved) -------
     if consistent_over and goal_type != "lose":
         adjustment = min((avg_cal - prev_cal) / 2, prev_cal * 0.10)
         new_cal += adjustment
         reasoning_parts.append(
             f"You've been consistently eating above your target (avg {round(avg_cal)} vs goal {prev_cal}). "
-            f"Raising target partway to better match reality."
+            f"Raising target partway to better match reality — it's better to have an honest target you can hit."
         )
 
-    # 6. Enforce 10% cap on all adjustments, floor at 1200 kcal
+    # ------------------------------------------------------------------
+    # Enforce 10% cap on all adjustments, floor at 1200 kcal (preserved)
+    # ------------------------------------------------------------------
     max_cal_change = prev_cal * 0.10
     new_cal = max(1200, min(new_cal, prev_cal + max_cal_change))
     new_cal = max(new_cal, prev_cal - max_cal_change)
@@ -879,7 +1220,7 @@ def run_recalibration(
     max_pro_change = prev_pro * 0.10
     new_pro = max(round(prev_pro - max_pro_change), min(round(new_pro), round(prev_pro + max_pro_change)))
 
-    # 7. Recompute carbs/fat from adjusted calories
+    # Recompute carbs/fat from adjusted calories (preserved)
     new_fat = round((new_cal * 0.30) / 9)
     max_fat_change = prev_fat * 0.10
     new_fat = max(round(prev_fat - max_fat_change), min(new_fat, round(prev_fat + max_fat_change)))
@@ -891,23 +1232,33 @@ def run_recalibration(
     max_carbs_change = prev_carbs * 0.10
     new_carbs = max(round(prev_carbs - max_carbs_change), min(new_carbs, round(prev_carbs + max_carbs_change)))
 
-    # Logging consistency insight
+    # ------------------------------------------------------------------
+    # Logging consistency insights (preserved, warmer language)
+    # ------------------------------------------------------------------
     if days_logged >= 6:
         insights.append({
             "type": "achievement",
             "title": "Consistent logging",
-            "body": f"You logged {days_logged} out of 7 days. Consistent tracking is the foundation of progress.",
+            "body": f"You logged {days_logged} out of 7 days — that's the foundation of real progress. "
+                    f"The more consistent your logging, the smarter ANI gets.",
         })
     elif days_logged >= 5:
         insights.append({
             "type": "tip",
             "title": "Almost full coverage",
-            "body": f"You logged {days_logged} of 7 days. Try to log every day for the most accurate recalibration.",
+            "body": f"You logged {days_logged} of 7 days — that's solid. Try to log every day for the most accurate recalibration. "
+                    f"Even a rough estimate is better than a missing day.",
         })
 
     if not reasoning_parts:
-        reasoning_parts.append("Your targets are on track. No changes needed this week.")
+        reasoning_parts.append(
+            "Your targets look good this week. The scale, your logging, and your activity all agree — no changes needed. "
+            "Keep doing what you're doing."
+        )
 
+    # ------------------------------------------------------------------
+    # Build analysis dict with new three-signal fields
+    # ------------------------------------------------------------------
     analysis = {
         "days_logged": days_logged,
         "avg_calories": round(avg_cal),
@@ -917,6 +1268,12 @@ def run_recalibration(
         "patterns": patterns,
         "avg_expenditure": round(avg_expenditure) if avg_expenditure is not None else None,
         "expenditure_vs_estimate": round(expenditure_vs_estimate) if expenditure_vs_estimate is not None else None,
+        "neat_estimate": round(neat_estimate) if neat_estimate else None,
+        "calories_out": round(calories_out) if calories_out else None,
+        "net_balance": round(net_balance) if net_balance is not None else None,
+        "weight_trend_signal": weight_trend_signal,
+        "energy_balance_agrees": energy_balance_agrees,
+        "signal_used": signal_used,
     }
 
     return {
@@ -1962,6 +2319,34 @@ def get_favorites(
 
 
 # ============================================================
+# PATCH /logs/{log_id}/meal-type  — move log to a different meal
+# ============================================================
+_VALID_MEAL_TYPES = {"breakfast", "lunch", "snack", "dinner"}
+
+
+@app.patch("/logs/{log_id}/meal-type")
+@limiter.limit("30/minute")
+def update_log_meal_type(
+    request: Request,
+    log_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    meal_type = (body.get("meal_type") or "").strip().lower()
+    if meal_type not in _VALID_MEAL_TYPES:
+        raise HTTPException(status_code=400, detail=f"meal_type must be one of: {', '.join(sorted(_VALID_MEAL_TYPES))}")
+
+    log = db.query(FoodLog).filter(FoodLog.id == log_id, FoodLog.user_id == current_user.id).first()
+    if not log:
+        raise HTTPException(status_code=404, detail="Log not found")
+
+    log.meal_type = meal_type
+    db.commit()
+    return {"status": "success", "meal_type": meal_type}
+
+
+# ============================================================
 # GET /logs/week  — last 7 days for current user
 # ============================================================
 @app.get("/logs/week")
@@ -2545,7 +2930,13 @@ def generate_workout_plan(
         else "No physical limitations."
     )
 
-    prompt = f"""You are an expert personal trainer. Generate a 1-week workout template that will be repeated for 6 weeks. Return valid JSON only.
+    prompt = f"""You are an expert strength and conditioning coach specialising in barbell training, CrossFit, and HYROX-style functional fitness. Generate a 1-week workout template that will be repeated for 6 weeks. Return valid JSON only.
+
+Programming philosophy:
+- Prioritise compound barbell movements (squat, deadlift, bench press, overhead press, clean, snatch, rows)
+- Include functional conditioning work (wall balls, sled push/pull, rowing, ski erg, assault bike, box jumps, farmers carry, battle rope, kettlebell swings)
+- Use only real, anatomically correct exercises — no made-up movements
+- Bodyweight gymnastics are encouraged (pull ups, dips, muscle ups, toes to bar, handstand push ups) when appropriate for experience level
 
 Athlete profile:
 - Goal: {goal_desc}
@@ -2559,7 +2950,7 @@ Requirements:
 - Exactly {profile.days_per_week} sessions
 - Each session fits within {profile.session_duration_minutes} minutes
 - Each session: 4-6 exercises
-- Include a "progression" field describing how to increase difficulty each week
+- Include a "progression" field describing how to increase difficulty each week (e.g. add weight, add sets, reduce rest times)
 
 Return ONLY valid JSON (no markdown, no code fences):
 {{
@@ -2919,6 +3310,17 @@ def ani_recalibrate(
         .all()
     )
 
+    # 30-day weight data for noisy-week fallback
+    weight_entries_30d = (
+        db.query(WeightEntry)
+        .filter(
+            WeightEntry.user_id == current_user.id,
+            WeightEntry.timestamp >= now - timedelta(days=30),
+            WeightEntry.timestamp < period_end,
+        )
+        .all()
+    )
+
     # Get active plan sessions for the period
     plan_sessions = []
     active_plan = (
@@ -2951,7 +3353,12 @@ def ani_recalibrate(
         "fat_goal": current_user.fat_goal or 0,
     }
 
-    result = run_recalibration(current_user, food_logs, weight_entries, plan_sessions, current_goals, health_metrics=health_metrics)
+    result = run_recalibration(
+        current_user, food_logs, weight_entries, plan_sessions, current_goals,
+        health_metrics=health_metrics,
+        weight_entries_30d=weight_entries_30d,
+        db=db,
+    )
 
     # Persist recalibration
     recal = ANIRecalibration(
@@ -2968,6 +3375,7 @@ def ani_recalibrate(
         new_fat_goal=result["new_goals"]["fat_goal"],
         analysis_json=json.dumps(result["analysis"]),
         reasoning=result["reasoning"],
+        neat_estimate=result["analysis"].get("neat_estimate"),
     )
     db.add(recal)
     db.flush()
@@ -3046,6 +3454,14 @@ def ani_targets(
     days_since = (now - latest.created_at).days
     days_until_next = max(0, 7 - days_since)
 
+    # Parse analysis JSON for three-signal data
+    analysis = {}
+    if latest.analysis_json:
+        try:
+            analysis = json.loads(latest.analysis_json)
+        except Exception:
+            pass
+
     return {
         "ani_active": True,
         "calorie_goal": latest.new_calorie_goal,
@@ -3055,6 +3471,15 @@ def ani_targets(
         "reasoning": latest.reasoning,
         "days_until_next": days_until_next,
         "last_recalibrated": latest.created_at.isoformat() if latest.created_at else None,
+        "neat_estimate": latest.neat_estimate,
+        "weight_trend_signal": analysis.get("weight_trend_signal"),
+        "weight_delta": analysis.get("weight_delta"),
+        "calories_out": analysis.get("calories_out"),
+        "net_balance": analysis.get("net_balance"),
+        "energy_balance_agrees": analysis.get("energy_balance_agrees"),
+        "signal_used": analysis.get("signal_used"),
+        "avg_calories": analysis.get("avg_calories"),
+        "avg_expenditure": analysis.get("avg_expenditure"),
     }
 
 
@@ -3095,6 +3520,7 @@ def ani_history(
                     "fat_goal": r.new_fat_goal,
                 },
                 "reasoning": r.reasoning,
+                "analysis": json.loads(r.analysis_json) if r.analysis_json else None,
             }
             for r in recals
         ]
@@ -3365,6 +3791,17 @@ def ani_auto_recalibrate(
                 .all()
             )
 
+            # 30-day weight data for noisy-week fallback
+            weight_entries_30d = (
+                db.query(WeightEntry)
+                .filter(
+                    WeightEntry.user_id == user.id,
+                    WeightEntry.timestamp >= now - timedelta(days=30),
+                    WeightEntry.timestamp < period_end,
+                )
+                .all()
+            )
+
             plan_sessions = []
             active_plan = (
                 db.query(WorkoutPlan)
@@ -3388,7 +3825,12 @@ def ani_auto_recalibrate(
                 "fat_goal": user.fat_goal or 0,
             }
 
-            result = run_recalibration(user, food_logs, weight_entries, plan_sessions, current_goals, health_metrics=health_metrics)
+            result = run_recalibration(
+                user, food_logs, weight_entries, plan_sessions, current_goals,
+                health_metrics=health_metrics,
+                weight_entries_30d=weight_entries_30d,
+                db=db,
+            )
 
             # Persist
             recal = ANIRecalibration(
@@ -3405,6 +3847,7 @@ def ani_auto_recalibrate(
                 new_fat_goal=result["new_goals"]["fat_goal"],
                 analysis_json=json.dumps(result["analysis"]),
                 reasoning=result["reasoning"],
+                neat_estimate=result["analysis"].get("neat_estimate"),
             )
             db.add(recal)
             db.flush()
