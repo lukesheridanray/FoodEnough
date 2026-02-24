@@ -10,6 +10,13 @@ interface PhotoInputTabProps {
   onUnauthorized: () => void;
 }
 
+interface EditableTotals {
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}
+
 export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTabProps) {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -19,6 +26,7 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
   const [savingImage, setSavingImage] = useState(false);
   const [saveImageError, setSaveImageError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [editTotals, setEditTotals] = useState<EditableTotals | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const clearImage = () => {
@@ -28,6 +36,7 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
     setAnalysisError("");
     setImageAnalysis(null);
     setSaveImageError("");
+    setEditTotals(null);
   };
 
   const analyzeImage = async (file: File) => {
@@ -35,6 +44,7 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
     setAnalysisError("");
     setImageAnalysis(null);
     setSaveImageError("");
+    setEditTotals(null);
     try {
       const formData = new FormData();
       formData.append("image", file);
@@ -43,7 +53,14 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
         body: formData,
       });
       if (res.ok) {
-        setImageAnalysis(await res.json());
+        const analysis: ImageAnalysis = await res.json();
+        setImageAnalysis(analysis);
+        setEditTotals({
+          calories: analysis.total.calories,
+          protein: analysis.total.protein,
+          carbs: analysis.total.carbs,
+          fat: analysis.total.fat,
+        });
       } else {
         const err = await res.json().catch(() => ({}));
         setAnalysisError(err.detail || "Failed to analyze photo. Please try again.");
@@ -71,8 +88,15 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
     analyzeImage(file);
   };
 
+  const handleFieldChange = (field: keyof EditableTotals, value: string) => {
+    if (!editTotals) return;
+    const num = value === "" ? 0 : Math.max(0, Math.round(Number(value)));
+    if (isNaN(num)) return;
+    setEditTotals({ ...editTotals, [field]: num });
+  };
+
   const handleImageSave = async () => {
-    if (!imageAnalysis) return;
+    if (!imageAnalysis || !editTotals) return;
     setSaveImageError("");
     setSavingImage(true);
     try {
@@ -82,17 +106,17 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           input_text: imageAnalysis.description,
-          calories: imageAnalysis.total.calories,
-          protein: imageAnalysis.total.protein,
-          carbs: imageAnalysis.total.carbs,
-          fat: imageAnalysis.total.fat,
+          calories: editTotals.calories,
+          protein: editTotals.protein,
+          carbs: editTotals.carbs,
+          fat: editTotals.fat,
           fiber: null,
           sugar: null,
           sodium: null,
           parsed_json: JSON.stringify({
             description: imageAnalysis.description,
             items: imageAnalysis.items,
-            total: imageAnalysis.total,
+            total: editTotals,
           }),
         }),
       });
@@ -195,21 +219,64 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
                       <td className="text-right px-2 py-1.5">{item.fat}g</td>
                     </tr>
                   ))}
-                  <tr className="bg-green-50 font-semibold text-green-800">
-                    <td className="px-3 py-1.5">Total</td>
-                    <td className="text-right px-2 py-1.5">{imageAnalysis.total.calories}</td>
-                    <td className="text-right px-2 py-1.5">{imageAnalysis.total.protein}g</td>
-                    <td className="text-right px-2 py-1.5">{imageAnalysis.total.carbs}g</td>
-                    <td className="text-right px-2 py-1.5">{imageAnalysis.total.fat}g</td>
-                  </tr>
                 </tbody>
               </table>
             </div>
           )}
+
+          {/* Editable totals form */}
+          {editTotals && (
+            <div className="border border-green-200 rounded-xl p-3 bg-green-50/50">
+              <p className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wider">Adjust before logging</p>
+              <div className="grid grid-cols-4 gap-2">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-0.5 font-medium">kcal</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editTotals.calories || ""}
+                    onChange={(e) => handleFieldChange("calories", e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-center focus:ring-2 focus:ring-green-500 focus:outline-none bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-blue-500 mb-0.5 font-medium">Protein</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editTotals.protein || ""}
+                    onChange={(e) => handleFieldChange("protein", e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-center focus:ring-2 focus:ring-green-500 focus:outline-none bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-amber-500 mb-0.5 font-medium">Carbs</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editTotals.carbs || ""}
+                    onChange={(e) => handleFieldChange("carbs", e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-center focus:ring-2 focus:ring-green-500 focus:outline-none bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-orange-500 mb-0.5 font-medium">Fat</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editTotals.fat || ""}
+                    onChange={(e) => handleFieldChange("fat", e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-center focus:ring-2 focus:ring-green-500 focus:outline-none bg-white"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
           {imageAnalysis && imageAnalysis.items.length > 0 && (
             <p className="text-xs text-gray-400 italic flex items-center gap-1">
               <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-              Nutrition estimated by AI from your photo — values are approximate
+              Nutrition estimated by AI — edit values above if needed
             </p>
           )}
           {saveImageError && <p className="text-red-500 text-xs">{saveImageError}</p>}

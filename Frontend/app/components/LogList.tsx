@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Pencil, Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import { Pencil, Loader2, ChevronDown, ChevronUp, ArrowRightLeft } from "lucide-react";
 import { Log } from "../hooks/useFoodLogs";
 import { formatTime } from "../../lib/auth";
 
@@ -20,9 +20,11 @@ interface LogListProps {
   onEditSave: (logId: number) => void;
   onDelete: (logId: number) => void;
   onExport: () => void;
+  onMoveMeal?: (logId: number, mealType: string) => void;
 }
 
 const MEAL_ORDER = ["Breakfast", "Lunch", "Snack", "Dinner", "Other"];
+const MEAL_TYPES = ["breakfast", "lunch", "snack", "dinner"];
 
 function groupByMealType(logs: Log[]): { label: string; logs: Log[] }[] {
   const hasMealTypes = logs.some((l) => l.meal_type);
@@ -55,6 +57,7 @@ function LogCard({
   setEditError,
   onEditSave,
   onDelete,
+  onMoveMeal,
 }: {
   log: Log;
   deleteConfirmId: number | null;
@@ -68,9 +71,12 @@ function LogCard({
   setEditError: (err: string) => void;
   onEditSave: (logId: number) => void;
   onDelete: (logId: number) => void;
+  onMoveMeal?: (logId: number, mealType: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [showMoveMenu, setShowMoveMenu] = useState(false);
   const hasItems = (log.items?.length ?? 0) > 1;
+  const currentMeal = (log.meal_type || "").toLowerCase();
 
   return (
     <div className="bg-white rounded-2xl p-4 shadow-sm">
@@ -138,8 +144,18 @@ function LogCard({
                 {formatTime(log.timestamp)}
               </div>
             </div>
-            {deleteConfirmId !== log.id && (
+            {deleteConfirmId !== log.id && !showMoveMenu && (
               <div className="flex items-center gap-1 flex-shrink-0">
+                {onMoveMeal && (
+                  <button
+                    onClick={() => setShowMoveMenu(true)}
+                    className="text-gray-400 hover:text-green-600 transition-colors p-2"
+                    title="Move to another meal"
+                    aria-label="Move to another meal"
+                  >
+                    <ArrowRightLeft className="w-4 h-4" />
+                  </button>
+                )}
                 <button
                   onClick={() => { setEditingId(log.id); setEditText(log.input_text); setDeleteConfirmId(null); }}
                   className="text-gray-400 hover:text-gray-600 transition-colors p-2"
@@ -159,6 +175,33 @@ function LogCard({
               </div>
             )}
           </div>
+
+          {/* Move to meal menu */}
+          {showMoveMenu && onMoveMeal && (
+            <div className="mt-2 pt-2 border-t border-gray-100">
+              <p className="text-xs text-gray-500 mb-1.5 font-medium">Move to:</p>
+              <div className="flex gap-2 flex-wrap">
+                {MEAL_TYPES.filter((m) => m !== currentMeal).map((meal) => (
+                  <button
+                    key={meal}
+                    onClick={() => {
+                      onMoveMeal(log.id, meal);
+                      setShowMoveMenu(false);
+                    }}
+                    className="px-3 py-1.5 text-xs rounded-lg bg-green-50 text-green-700 font-medium hover:bg-green-100 border border-green-200 capitalize transition-colors"
+                  >
+                    {meal}
+                  </button>
+                ))}
+                <button
+                  onClick={() => setShowMoveMenu(false)}
+                  className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Expanded item breakdown */}
           {expanded && hasItems && (
@@ -220,6 +263,7 @@ export default function LogList({
   onEditSave,
   onDelete,
   onExport,
+  onMoveMeal,
 }: LogListProps) {
   const groups = groupByMealType(logs);
 
@@ -274,6 +318,7 @@ export default function LogList({
                     setEditError={setEditError}
                     onEditSave={onEditSave}
                     onDelete={onDelete}
+                    onMoveMeal={onMoveMeal}
                   />
                 ))}
               </div>
