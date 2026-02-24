@@ -189,6 +189,7 @@ export default function WorkoutsPage() {
         expandedSession={w.expandedSession}
         setExpandedSession={w.setExpandedSession}
         completingSession={w.completingSession}
+        toggleToast={w.toggleToast}
         abandoningPlan={w.abandoningPlan}
         abandonError={w.abandonError}
         showAbandonConfirm={w.showAbandonConfirm}

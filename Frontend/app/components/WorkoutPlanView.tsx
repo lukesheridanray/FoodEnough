@@ -25,6 +25,7 @@ interface WorkoutPlanViewProps {
   expandedSession: number | null;
   setExpandedSession: (session: number | null) => void;
   completingSession: number | null;
+  toggleToast: string | null;
   abandoningPlan: boolean;
   abandonError: string;
   showAbandonConfirm: boolean;
@@ -41,6 +42,7 @@ export default function WorkoutPlanView({
   expandedSession,
   setExpandedSession,
   completingSession,
+  toggleToast,
   abandoningPlan,
   abandonError,
   showAbandonConfirm,
@@ -190,15 +192,21 @@ export default function WorkoutPlanView({
                               ) : null}
                             </div>
                           </button>
-                          {!session.is_completed && (
-                            <button
-                              onClick={() => onCompleteSession(session.id)}
-                              disabled={completingSession === session.id}
-                              className="text-xs px-3 py-1.5 bg-green-500 text-white rounded-lg font-medium disabled:opacity-60 flex-shrink-0"
-                            >
-                              {completingSession === session.id ? "\u2026" : "Done \u2713"}
-                            </button>
-                          )}
+                          <button
+                            onClick={() => onCompleteSession(session.id)}
+                            disabled={completingSession === session.id}
+                            className={`text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-60 flex-shrink-0 ${
+                              session.is_completed
+                                ? "bg-green-100 text-green-700 border border-green-300"
+                                : "bg-green-500 text-white"
+                            }`}
+                          >
+                            {completingSession === session.id
+                              ? "\u2026"
+                              : session.is_completed
+                                ? "Completed \u2713"
+                                : "Done \u2713"}
+                          </button>
                         </div>
 
                         {/* Exercise preview */}
@@ -235,6 +243,13 @@ export default function WorkoutPlanView({
           );
         })}
       </section>
+
+      {/* Toggle toast */}
+      {toggleToast && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-gray-800 text-white text-sm px-4 py-2.5 rounded-xl shadow-lg animate-fade-in">
+          {toggleToast}
+        </div>
+      )}
     </>
   );
 }

@@ -70,6 +70,7 @@ export function useWorkouts() {
   const [expandedWeek, setExpandedWeek] = useState<number | null>(null);
   const [expandedSession, setExpandedSession] = useState<number | null>(null);
   const [completingSession, setCompletingSession] = useState<number | null>(null);
+  const [toggleToast, setToggleToast] = useState<string | null>(null);
   const [abandoningPlan, setAbandoningPlan] = useState(false);
   const [abandonError, setAbandonError] = useState("");
   const [showAbandonConfirm, setShowAbandonConfirm] = useState(false);
@@ -211,26 +212,47 @@ export function useWorkouts() {
 
   const handleCompleteSession = async (sessionId: number) => {
     setCompletingSession(sessionId);
+    setToggleToast(null);
     try {
       const tzOffset = new Date().getTimezoneOffset() * -1;
       const res = await apiFetch(`/plan-sessions/${sessionId}/complete?tz_offset_minutes=${tzOffset}`, { method: "PUT" });
       if (res.ok) {
         const data = await res.json().catch(() => ({}));
-        const estimatedCalories = data.estimated_calories || 0;
-        setActivePlan((prev) => {
-          if (!prev) return prev;
-          const now = new Date().toISOString();
-          const updatedWeeks = prev.weeks.map((w) => ({
-            ...w,
-            sessions: w.sessions.map((s) =>
-              s.id === sessionId ? { ...s, is_completed: true, completed_at: now, estimated_calories: estimatedCalories } : s
-            ),
-          }));
-          const completedCount = updatedWeeks
-            .flatMap((w) => w.sessions)
-            .filter((s) => s.is_completed).length;
-          return { ...prev, weeks: updatedWeeks, completed_sessions: completedCount };
-        });
+        if (data.status === "uncompleted") {
+          // Toggled OFF — remove completion
+          setActivePlan((prev) => {
+            if (!prev) return prev;
+            const updatedWeeks = prev.weeks.map((w) => ({
+              ...w,
+              sessions: w.sessions.map((s) =>
+                s.id === sessionId ? { ...s, is_completed: false, completed_at: null, estimated_calories: 0 } : s
+              ),
+            }));
+            const completedCount = updatedWeeks
+              .flatMap((w) => w.sessions)
+              .filter((s) => s.is_completed).length;
+            return { ...prev, weeks: updatedWeeks, completed_sessions: completedCount };
+          });
+          setToggleToast("Workout removed and calories adjusted");
+          setTimeout(() => setToggleToast(null), 3000);
+        } else {
+          // Toggled ON — marked complete
+          const estimatedCalories = data.estimated_calories || 0;
+          setActivePlan((prev) => {
+            if (!prev) return prev;
+            const now = new Date().toISOString();
+            const updatedWeeks = prev.weeks.map((w) => ({
+              ...w,
+              sessions: w.sessions.map((s) =>
+                s.id === sessionId ? { ...s, is_completed: true, completed_at: now, estimated_calories: estimatedCalories } : s
+              ),
+            }));
+            const completedCount = updatedWeeks
+              .flatMap((w) => w.sessions)
+              .filter((s) => s.is_completed).length;
+            return { ...prev, weeks: updatedWeeks, completed_sessions: completedCount };
+          });
+        }
         loadActivePlan();
       }
     } catch (err) {
@@ -309,6 +331,7 @@ export function useWorkouts() {
     expandedSession,
     setExpandedSession,
     completingSession,
+    toggleToast,
     abandoningPlan,
     abandonError,
     showAbandonConfirm,

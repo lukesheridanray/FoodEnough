@@ -3635,10 +3635,34 @@ def complete_plan_session(
     )
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    # --- TOGGLE OFF: uncomplete a completed session ---
     if session.is_completed:
-        return {"status": "already_completed"}
+        removed_calories = 0
+        existing_bl = (
+            db.query(BurnLog)
+            .filter(
+                BurnLog.user_id == current_user.id,
+                BurnLog.plan_session_id == session.id,
+            )
+            .first()
+        )
+        if existing_bl:
+            removed_calories = round(existing_bl.calories_burned)
+            db.delete(existing_bl)
+            db.flush()
+            _reaggregate_burn_for_date(db, current_user.id, now_utc, tz_offset_minutes)
+
+        session.is_completed = 0
+        session.completed_at = None
+        db.commit()
+        return {"status": "uncompleted", "removed_calories": removed_calories}
+
+    # --- TOGGLE ON: mark session complete ---
     session.is_completed = 1
-    session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    session.completed_at = now_utc
 
     # --- Estimate calories burned and create BurnLog ---
     estimated_calories = 0
@@ -3675,7 +3699,6 @@ def complete_plan_session(
                 workout_type = wtype
                 break
 
-        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
         bl = BurnLog(
             user_id=current_user.id,
             timestamp=now_utc,
