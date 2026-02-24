@@ -282,6 +282,18 @@ class BurnLog(Base):
 
 Base.metadata.create_all(bind=engine)
 
+# ---- Lightweight column migrations (create_all won't add columns to existing tables) ----
+def _ensure_columns():
+    """Add any columns that were introduced after initial table creation."""
+    from sqlalchemy import inspect as sa_inspect, text as sa_text
+    insp = sa_inspect(engine)
+    if "users" in insp.get_table_names():
+        existing = {c["name"] for c in insp.get_columns("users")}
+        if "goal_weight_lbs" not in existing:
+            with engine.begin() as conn:
+                conn.execute(sa_text("ALTER TABLE users ADD COLUMN goal_weight_lbs REAL"))
+
+_ensure_columns()
 
 # ============================================================
 # App + CORS
