@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { getToken, removeToken, getTzOffsetMinutes } from "../../lib/auth";
 import { apiFetch, UnauthorizedError } from "../../lib/api";
@@ -81,7 +81,21 @@ interface Favorite {
   avg_fat: number;
 }
 
-export type { Summary, ImageItem, ImageAnalysis, BarcodeResult, Log, Favorite };
+interface LogEditFields {
+  input_text?: string;
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  meal_type?: string;
+  date?: string;
+}
+
+export type { Summary, ImageItem, ImageAnalysis, BarcodeResult, Log, Favorite, LogEditFields };
+
+function toDateString(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 export function useFoodLogs() {
   const [logs, setLogs] = useState<Log[]>([]);
@@ -95,16 +109,23 @@ export function useFoodLogs() {
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [deleteError, setDeleteError] = useState("");
   const [exportError, setExportError] = useState("");
+  const [selectedDate, setSelectedDate] = useState<string>(toDateString(new Date()));
   const router = useRouter();
+
+  const selectedDateRef = useRef(selectedDate);
+  selectedDateRef.current = selectedDate;
+
+  const isToday = selectedDate === toDateString(new Date());
 
   const handleUnauthorized = () => {
     router.push("/login");
   };
 
-  const loadLogs = async () => {
+  const loadLogs = useCallback(async () => {
     try {
       const tzOffset = getTzOffsetMinutes();
-      const res = await apiFetch(`/logs/today?tz_offset_minutes=${tzOffset}`);
+      const dateParam = `&date=${selectedDateRef.current}`;
+      const res = await apiFetch(`/logs/today?tz_offset_minutes=${tzOffset}${dateParam}`);
       const data = await res.json().catch(() => ({ logs: [] }));
       const logsWithItems = (data.logs || []).map((log: Log) => {
         if (log.parsed_json) {
@@ -122,12 +143,13 @@ export function useFoodLogs() {
       if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
       console.error("Error loading logs:", err);
     }
-  };
+  }, []);
 
-  const loadSummary = async () => {
+  const loadSummary = useCallback(async () => {
     try {
       const tzOffset = getTzOffsetMinutes();
-      const res = await apiFetch(`/summary/today?tz_offset_minutes=${tzOffset}`);
+      const dateParam = `&date=${selectedDateRef.current}`;
+      const res = await apiFetch(`/summary/today?tz_offset_minutes=${tzOffset}${dateParam}`);
       if (res.ok) setSummary(await res.json().catch(() => null));
     } catch (err) {
       if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
@@ -135,9 +157,9 @@ export function useFoodLogs() {
     } finally {
       setSummaryLoading(false);
     }
-  };
+  }, []);
 
-  const loadFavorites = async () => {
+  const loadFavorites = useCallback(async () => {
     try {
       const res = await apiFetch("/logs/favorites");
       if (res.ok) {
@@ -148,12 +170,19 @@ export function useFoodLogs() {
       if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
       // non-fatal
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (!getToken()) { router.push("/login"); return; }
     Promise.all([loadLogs(), loadSummary(), loadFavorites()]);
   }, []);
+
+  // Reload logs and summary when selected date changes
+  useEffect(() => {
+    setSummaryLoading(true);
+    loadLogs();
+    loadSummary();
+  }, [selectedDate]);
 
   const handleExport = async () => {
     setExportError("");
@@ -199,6 +228,35 @@ export function useFoodLogs() {
     } catch (err) {
       if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
       setEditError("Connection failed. Please try again.");
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const handleDirectEdit = async (logId: number, fields: LogEditFields): Promise<boolean> => {
+    setEditError("");
+    setEditLoading(true);
+    try {
+      const tzOffset = getTzOffsetMinutes();
+      const res = await apiFetch(`/logs/${logId}?tz_offset_minutes=${tzOffset}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fields),
+      });
+      if (res.ok) {
+        setEditingId(null);
+        loadLogs();
+        loadSummary();
+        return true;
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setEditError(err.detail || "Failed to save. Please try again.");
+        return false;
+      }
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return false; }
+      setEditError("Connection failed. Please try again.");
+      return false;
     } finally {
       setEditLoading(false);
     }
@@ -281,11 +339,15 @@ export function useFoodLogs() {
     deleteError,
     setDeleteError,
     exportError,
+    selectedDate,
+    setSelectedDate,
+    isToday,
     loadLogs,
     loadSummary,
     loadFavorites,
     handleExport,
     handleEditSave,
+    handleDirectEdit,
     handleDelete,
     handleMoveMeal,
     handleQuickAdd,

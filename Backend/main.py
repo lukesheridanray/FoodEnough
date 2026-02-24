@@ -312,7 +312,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -455,6 +455,13 @@ def send_admin_signup_notification(user_email: str) -> bool:
 <p style="color:#6b7280;font-size:13px">{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</p>
 </body></html>""",
     )
+
+
+def _sanitize_csv_field(value: str) -> str:
+    """Prevent CSV injection by escaping fields that start with formula characters."""
+    if value and value[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
 
 
 # ============================================================
@@ -1569,6 +1576,33 @@ class FoodInput(BaseModel):
         return v
 
 
+class FoodLogEdit(BaseModel):
+    input_text: Optional[str] = Field(default=None, max_length=2000)
+    calories: Optional[float] = None
+    protein: Optional[float] = None
+    carbs: Optional[float] = None
+    fat: Optional[float] = None
+    fiber: Optional[float] = None
+    sugar: Optional[float] = None
+    sodium: Optional[float] = None
+    meal_type: Optional[str] = None
+    date: Optional[str] = Field(default=None, description="YYYY-MM-DD to move entry to a different date")
+
+    @field_validator("meal_type")
+    @classmethod
+    def meal_type_valid(cls, v):
+        if v is not None and v not in ("breakfast", "lunch", "snack", "dinner"):
+            raise ValueError("meal_type must be breakfast, lunch, snack, or dinner")
+        return v
+
+    @field_validator("calories", "protein", "carbs", "fat")
+    @classmethod
+    def macro_valid(cls, v):
+        if v is not None and (v < 0 or v > 50000):
+            raise ValueError("Value must be between 0 and 50000")
+        return v
+
+
 class RegisterInput(BaseModel):
     email: EmailStr
     password: str
@@ -2004,6 +2038,8 @@ def delete_account(
     try:
         # Delete health metrics
         db.query(HealthMetric).filter(HealthMetric.user_id == user_id).delete(synchronize_session=False)
+        # Delete burn logs (FK to users and plan_sessions)
+        db.query(BurnLog).filter(BurnLog.user_id == user_id).delete(synchronize_session=False)
         # Delete ANI data first (insights FK to recalibrations)
         db.query(ANIInsight).filter(ANIInsight.user_id == user_id).delete(synchronize_session=False)
         db.query(ANIRecalibration).filter(ANIRecalibration.user_id == user_id).delete(synchronize_session=False)
@@ -2118,6 +2154,9 @@ def save_log(
             protein=total["protein"],
             carbs=total["carbs"],
             fat=total["fat"],
+            fiber=total.get("fiber"),
+            sugar=total.get("sugar"),
+            sodium=total.get("sodium"),
             meal_type=infer_meal_type(now, tz_offset_minutes),
         )
 
@@ -2190,6 +2229,9 @@ def update_log(
         log.protein = total["protein"]
         log.carbs = total["carbs"]
         log.fat = total["fat"]
+        log.fiber = total.get("fiber")
+        log.sugar = total.get("sugar")
+        log.sodium = total.get("sodium")
         db.commit()
         db.refresh(log)
         return {"status": "success", "entry_id": log.id}
@@ -2199,6 +2241,71 @@ def update_log(
         db.rollback()
         print(f"PUT /logs/{log_id} error:", e)
         raise HTTPException(status_code=500, detail="An internal error occurred")
+
+
+# ============================================================
+# PATCH /logs/{log_id}  — direct field edit (no AI re-parse)
+# ============================================================
+@app.patch("/logs/{log_id}")
+@limiter.limit("30/minute")
+def patch_log(
+    request: Request,
+    log_id: int,
+    data: FoodLogEdit,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    tz_offset_minutes: int = Query(default=0, ge=-720, le=840),
+):
+    log = db.query(FoodLog).filter(FoodLog.id == log_id, FoodLog.user_id == current_user.id).first()
+    if not log:
+        raise HTTPException(status_code=404, detail="Log not found")
+
+    if data.input_text is not None:
+        log.input_text = data.input_text
+    if data.calories is not None:
+        log.calories = data.calories
+    if data.protein is not None:
+        log.protein = data.protein
+    if data.carbs is not None:
+        log.carbs = data.carbs
+    if data.fat is not None:
+        log.fat = data.fat
+    if data.fiber is not None:
+        log.fiber = data.fiber
+    if data.sugar is not None:
+        log.sugar = data.sugar
+    if data.sodium is not None:
+        log.sodium = data.sodium
+    if data.meal_type is not None:
+        log.meal_type = data.meal_type
+    if data.date is not None:
+        try:
+            target_date = datetime.strptime(data.date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+        # Keep original time-of-day, just change the date
+        old_local = log.timestamp + timedelta(minutes=tz_offset_minutes)
+        new_local = target_date.replace(hour=old_local.hour, minute=old_local.minute, second=old_local.second)
+        log.timestamp = new_local - timedelta(minutes=tz_offset_minutes)
+
+    db.commit()
+    db.refresh(log)
+    return {
+        "status": "success",
+        "entry": {
+            "id": log.id,
+            "input_text": log.input_text,
+            "timestamp": log.timestamp.isoformat(),
+            "calories": log.calories,
+            "protein": log.protein,
+            "carbs": log.carbs,
+            "fat": log.fat,
+            "fiber": log.fiber,
+            "sugar": log.sugar,
+            "sodium": log.sodium,
+            "meal_type": log.meal_type,
+        },
+    }
 
 
 # ============================================================
@@ -2310,6 +2417,9 @@ async def save_log_from_image(
             protein=total["protein"],
             carbs=total["carbs"],
             fat=total["fat"],
+            fiber=total.get("fiber"),
+            sugar=total.get("sugar"),
+            sodium=total.get("sodium"),
             meal_type=infer_meal_type(now, tz_offset_minutes),
         )
         db.add(log)
@@ -2472,11 +2582,19 @@ def get_logs_today(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tz_offset_minutes: int = Query(default=0, ge=-720, le=840),
+    date: Optional[str] = Query(default=None, description="YYYY-MM-DD to fetch logs for a specific date"),
 ):
-    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-    local_now = now_utc + timedelta(minutes=tz_offset_minutes)
-    local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
-    utc_start = local_midnight - timedelta(minutes=tz_offset_minutes)
+    if date:
+        try:
+            target = datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+        utc_start = target - timedelta(minutes=tz_offset_minutes)
+    else:
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        local_now = now_utc + timedelta(minutes=tz_offset_minutes)
+        local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        utc_start = local_midnight - timedelta(minutes=tz_offset_minutes)
     utc_end = utc_start + timedelta(days=1)
 
     logs = (
@@ -2636,12 +2754,6 @@ def export_logs_csv(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    def _sanitize_csv_field(value: str) -> str:
-        """Prevent CSV injection by escaping fields that start with formula characters."""
-        if value and value[0] in ("=", "+", "-", "@", "\t", "\r"):
-            return "'" + value
-        return value
-
     def _generate_csv():
         """Yield CSV rows in batches to avoid loading all logs into memory."""
         # Write header
@@ -2950,11 +3062,19 @@ def get_today_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     tz_offset_minutes: int = Query(default=0, ge=-720, le=840),
+    date: Optional[str] = Query(default=None, description="YYYY-MM-DD to get summary for a specific date"),
 ):
-    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-    local_now = now_utc + timedelta(minutes=tz_offset_minutes)
-    local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
-    utc_start = local_midnight - timedelta(minutes=tz_offset_minutes)
+    if date:
+        try:
+            target = datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+        utc_start = target - timedelta(minutes=tz_offset_minutes)
+    else:
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        local_now = now_utc + timedelta(minutes=tz_offset_minutes)
+        local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        utc_start = local_midnight - timedelta(minutes=tz_offset_minutes)
     utc_end = utc_start + timedelta(days=1)
 
     # Today's food logs
@@ -3653,29 +3773,36 @@ def export_burn_logs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    logs = (
-        db.query(BurnLog)
-        .filter(BurnLog.user_id == current_user.id)
-        .order_by(BurnLog.timestamp.desc())
-        .all()
-    )
-    output = StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["timestamp", "workout_type", "duration_minutes", "calories_burned", "avg_heart_rate", "max_heart_rate", "source", "notes"])
-    for bl in logs:
-        writer.writerow([
-            bl.timestamp.isoformat() if bl.timestamp else "",
-            bl.workout_type,
-            bl.duration_minutes or "",
-            bl.calories_burned,
-            bl.avg_heart_rate or "",
-            bl.max_heart_rate or "",
-            bl.source,
-            bl.notes or "",
-        ])
-    output.seek(0)
+    def _generate_csv():
+        """Yield CSV rows in batches to avoid loading all logs into memory."""
+        header_buf = StringIO()
+        writer = csv.writer(header_buf)
+        writer.writerow(["timestamp", "workout_type", "duration_minutes", "calories_burned", "avg_heart_rate", "max_heart_rate", "source", "notes"])
+        yield header_buf.getvalue()
+
+        query = (
+            db.query(BurnLog)
+            .filter(BurnLog.user_id == current_user.id)
+            .order_by(BurnLog.timestamp.desc())
+            .yield_per(200)
+        )
+        for bl in query:
+            row_buf = StringIO()
+            row_writer = csv.writer(row_buf)
+            row_writer.writerow([
+                bl.timestamp.isoformat() if bl.timestamp else "",
+                _sanitize_csv_field(bl.workout_type or ""),
+                bl.duration_minutes or "",
+                bl.calories_burned,
+                bl.avg_heart_rate or "",
+                bl.max_heart_rate or "",
+                bl.source,
+                _sanitize_csv_field(bl.notes or ""),
+            ])
+            yield row_buf.getvalue()
+
     return StreamingResponse(
-        iter([output.getvalue()]),
+        _generate_csv(),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=burn_logs.csv"},
     )

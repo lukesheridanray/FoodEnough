@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
-import { Pencil, Loader2, ChevronDown, ChevronUp, ArrowRightLeft } from "lucide-react";
-import { Log } from "../hooks/useFoodLogs";
+import { Pencil, Loader2, ChevronDown, ChevronUp, ArrowRightLeft, Trash2, Check, X } from "lucide-react";
+import { Log, LogEditFields } from "../hooks/useFoodLogs";
 import { formatTime } from "../../lib/auth";
 
 interface LogListProps {
@@ -18,6 +18,7 @@ interface LogListProps {
   deleteError?: string;
   exportError?: string;
   onEditSave: (logId: number) => void;
+  onDirectEdit?: (logId: number, fields: LogEditFields) => Promise<boolean>;
   onDelete: (logId: number) => void;
   onExport: () => void;
   onMoveMeal?: (logId: number, mealType: string) => void;
@@ -44,67 +45,162 @@ function groupByMealType(logs: Log[]): { label: string; logs: Log[] }[] {
     .map((label) => ({ label, logs: groups[label] }));
 }
 
+function EditForm({
+  log,
+  editLoading,
+  editError,
+  onSave,
+  onCancel,
+}: {
+  log: Log;
+  editLoading: boolean;
+  editError: string;
+  onSave: (fields: LogEditFields) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(log.input_text);
+  const [calories, setCalories] = useState(String(log.calories));
+  const [protein, setProtein] = useState(String(log.protein));
+  const [carbs, setCarbs] = useState(String(log.carbs));
+  const [fat, setFat] = useState(String(log.fat));
+  const [mealType, setMealType] = useState(log.meal_type || "dinner");
+  const [date, setDate] = useState(() => {
+    const d = new Date(log.timestamp);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  });
+
+  const handleSubmit = () => {
+    const fields: LogEditFields = {};
+    if (name !== log.input_text) fields.input_text = name;
+    const cal = parseFloat(calories);
+    if (!isNaN(cal) && cal !== log.calories) fields.calories = cal;
+    const pro = parseFloat(protein);
+    if (!isNaN(pro) && pro !== log.protein) fields.protein = pro;
+    const crb = parseFloat(carbs);
+    if (!isNaN(crb) && crb !== log.carbs) fields.carbs = crb;
+    const ft = parseFloat(fat);
+    if (!isNaN(ft) && ft !== log.fat) fields.fat = ft;
+    if (mealType !== (log.meal_type || "")) fields.meal_type = mealType;
+
+    const origDate = new Date(log.timestamp);
+    const origDateStr = `${origDate.getFullYear()}-${String(origDate.getMonth() + 1).padStart(2, "0")}-${String(origDate.getDate()).padStart(2, "0")}`;
+    if (date !== origDateStr) fields.date = date;
+
+    if (Object.keys(fields).length === 0) { onCancel(); return; }
+    onSave(fields);
+  };
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className="text-xs font-medium text-gray-500 block mb-1">Food</label>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="w-full border border-green-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
+          autoFocus
+        />
+      </div>
+
+      <div className="grid grid-cols-4 gap-2">
+        <div>
+          <label className="text-[10px] font-medium text-gray-400 block mb-0.5">Calories</label>
+          <input type="number" value={calories} onChange={(e) => setCalories(e.target.value)}
+            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-center focus:ring-2 focus:ring-green-500 focus:outline-none" />
+        </div>
+        <div>
+          <label className="text-[10px] font-medium text-blue-400 block mb-0.5">Protein</label>
+          <input type="number" value={protein} onChange={(e) => setProtein(e.target.value)}
+            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-center focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+        </div>
+        <div>
+          <label className="text-[10px] font-medium text-amber-400 block mb-0.5">Carbs</label>
+          <input type="number" value={carbs} onChange={(e) => setCarbs(e.target.value)}
+            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-center focus:ring-2 focus:ring-amber-500 focus:outline-none" />
+        </div>
+        <div>
+          <label className="text-[10px] font-medium text-orange-400 block mb-0.5">Fat</label>
+          <input type="number" value={fat} onChange={(e) => setFat(e.target.value)}
+            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-center focus:ring-2 focus:ring-orange-500 focus:outline-none" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-[10px] font-medium text-gray-400 block mb-0.5">Meal</label>
+          <select value={mealType} onChange={(e) => setMealType(e.target.value)}
+            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:ring-2 focus:ring-green-500 focus:outline-none capitalize">
+            {MEAL_TYPES.map((m) => (
+              <option key={m} value={m} className="capitalize">{m.charAt(0).toUpperCase() + m.slice(1)}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-[10px] font-medium text-gray-400 block mb-0.5">Date</label>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+            max={`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-${String(new Date().getDate()).padStart(2, "0")}`}
+            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none" />
+        </div>
+      </div>
+
+      {editError && <p className="text-red-500 text-xs">{editError}</p>}
+
+      <div className="flex gap-2">
+        <button
+          onClick={onCancel}
+          disabled={editLoading}
+          className="flex-1 py-2 text-xs rounded-xl border border-gray-200 text-gray-500 hover:bg-gray-50 flex items-center justify-center gap-1"
+        >
+          <X className="w-3 h-3" /> Cancel
+        </button>
+        <button
+          onClick={handleSubmit}
+          disabled={editLoading || !name.trim()}
+          className="flex-1 py-2 text-xs rounded-xl bg-green-500 text-white hover:bg-green-600 disabled:opacity-60 flex items-center justify-center gap-1"
+        >
+          {editLoading ? <><Loader2 className="w-3 h-3 animate-spin" />Saving&hellip;</> : <><Check className="w-3 h-3" /> Save</>}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function LogCard({
   log,
   deleteConfirmId,
   setDeleteConfirmId,
   editingId,
   setEditingId,
-  editText,
-  setEditText,
   editLoading,
   editError,
   setEditError,
-  onEditSave,
+  onDirectEdit,
   onDelete,
-  onMoveMeal,
 }: {
   log: Log;
   deleteConfirmId: number | null;
   setDeleteConfirmId: (id: number | null) => void;
   editingId: number | null;
   setEditingId: (id: number | null) => void;
-  editText: string;
-  setEditText: (text: string) => void;
   editLoading: boolean;
   editError: string;
   setEditError: (err: string) => void;
-  onEditSave: (logId: number) => void;
+  onDirectEdit?: (logId: number, fields: LogEditFields) => Promise<boolean>;
   onDelete: (logId: number) => void;
-  onMoveMeal?: (logId: number, mealType: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [showMoveMenu, setShowMoveMenu] = useState(false);
   const hasItems = (log.items?.length ?? 0) > 1;
-  const currentMeal = (log.meal_type || "").toLowerCase();
 
   return (
     <div className="bg-white rounded-2xl p-4 shadow-sm">
-      {editingId === log.id ? (
-        <div className="space-y-2">
-          <input
-            value={editText}
-            onChange={(e) => setEditText(e.target.value)}
-            className="w-full border border-green-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:outline-none"
-            autoFocus
-          />
-          {editError && <p className="text-red-500 text-xs">{editError}</p>}
-          <div className="flex gap-2">
-            <button
-              onClick={() => { setEditingId(null); setEditError(""); }}
-              className="flex-1 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => onEditSave(log.id)}
-              disabled={editLoading || !editText.trim()}
-              className="flex-1 py-1.5 text-xs rounded-lg bg-green-500 text-white hover:bg-green-600 disabled:opacity-60 flex items-center justify-center gap-1"
-            >
-              {editLoading ? <><Loader2 className="w-3 h-3 animate-spin" />Saving{"\u2026"}</> : "Save"}
-            </button>
-          </div>
-        </div>
+      {editingId === log.id && onDirectEdit ? (
+        <EditForm
+          log={log}
+          editLoading={editLoading}
+          editError={editError}
+          onSave={(fields) => onDirectEdit(log.id, fields)}
+          onCancel={() => { setEditingId(null); setEditError(""); }}
+        />
       ) : (
         <>
           <div className="flex justify-between items-start">
@@ -142,23 +238,16 @@ function LogCard({
               )}
               <div className="text-xs text-gray-400 mt-1">
                 {formatTime(log.timestamp)}
+                {log.meal_type && (
+                  <span className="ml-2 px-1.5 py-0.5 bg-green-50 text-green-600 rounded font-medium capitalize">{log.meal_type}</span>
+                )}
               </div>
             </div>
-            {deleteConfirmId !== log.id && !showMoveMenu && (
-              <div className="flex items-center gap-1 flex-shrink-0">
-                {onMoveMeal && (
-                  <button
-                    onClick={() => setShowMoveMenu(true)}
-                    className="text-gray-400 hover:text-green-600 transition-colors p-2"
-                    title="Move to another meal"
-                    aria-label="Move to another meal"
-                  >
-                    <ArrowRightLeft className="w-4 h-4" />
-                  </button>
-                )}
+            {deleteConfirmId !== log.id && (
+              <div className="flex items-center gap-0.5 flex-shrink-0">
                 <button
-                  onClick={() => { setEditingId(log.id); setEditText(log.input_text); setDeleteConfirmId(null); }}
-                  className="text-gray-400 hover:text-gray-600 transition-colors p-2"
+                  onClick={() => { setEditingId(log.id); setDeleteConfirmId(null); }}
+                  className="text-gray-400 hover:text-green-600 transition-colors p-2"
                   title="Edit"
                   aria-label="Edit log"
                 >
@@ -166,42 +255,15 @@ function LogCard({
                 </button>
                 <button
                   onClick={() => setDeleteConfirmId(log.id)}
-                  className="text-red-400 hover:text-red-600 text-xl transition-colors p-2"
+                  className="text-gray-400 hover:text-red-500 transition-colors p-2"
                   title="Delete"
                   aria-label="Delete log"
                 >
-                  {"\u00d7"}
+                  <Trash2 className="w-4 h-4" />
                 </button>
               </div>
             )}
           </div>
-
-          {/* Move to meal menu */}
-          {showMoveMenu && onMoveMeal && (
-            <div className="mt-2 pt-2 border-t border-gray-100">
-              <p className="text-xs text-gray-500 mb-1.5 font-medium">Move to:</p>
-              <div className="flex gap-2 flex-wrap">
-                {MEAL_TYPES.filter((m) => m !== currentMeal).map((meal) => (
-                  <button
-                    key={meal}
-                    onClick={() => {
-                      onMoveMeal(log.id, meal);
-                      setShowMoveMenu(false);
-                    }}
-                    className="px-3 py-1.5 text-xs rounded-lg bg-green-50 text-green-700 font-medium hover:bg-green-100 border border-green-200 capitalize transition-colors"
-                  >
-                    {meal}
-                  </button>
-                ))}
-                <button
-                  onClick={() => setShowMoveMenu(false)}
-                  className="px-3 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
 
           {/* Expanded item breakdown */}
           {expanded && hasItems && (
@@ -253,17 +315,14 @@ export default function LogList({
   setDeleteConfirmId,
   editingId,
   setEditingId,
-  editText,
-  setEditText,
   editLoading,
   editError,
   setEditError,
   deleteError,
   exportError,
-  onEditSave,
+  onDirectEdit,
   onDelete,
   onExport,
-  onMoveMeal,
 }: LogListProps) {
   const groups = groupByMealType(logs);
 
@@ -311,14 +370,11 @@ export default function LogList({
                     setDeleteConfirmId={setDeleteConfirmId}
                     editingId={editingId}
                     setEditingId={setEditingId}
-                    editText={editText}
-                    setEditText={setEditText}
                     editLoading={editLoading}
                     editError={editError}
                     setEditError={setEditError}
-                    onEditSave={onEditSave}
+                    onDirectEdit={onDirectEdit}
                     onDelete={onDelete}
-                    onMoveMeal={onMoveMeal}
                   />
                 ))}
               </div>

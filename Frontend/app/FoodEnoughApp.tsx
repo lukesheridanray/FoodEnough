@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import { LogOut, Camera, ScanBarcode, X, Loader2, MessageSquare, PenLine, Brain } from "lucide-react";
+import { LogOut, Camera, ScanBarcode, X, Loader2, MessageSquare, PenLine, Brain, ChevronLeft, ChevronRight } from "lucide-react";
 import BottomNav from "./components/BottomNav";
 import BarcodeScanner from "./components/BarcodeScanner";
 import SummaryCard from "./components/SummaryCard";
@@ -35,17 +35,39 @@ export default function FoodEnoughApp() {
     favorites,
     deleteError,
     exportError,
+    selectedDate,
+    setSelectedDate,
+    isToday,
     loadLogs,
     loadSummary,
     loadFavorites,
     handleExport,
     handleEditSave,
+    handleDirectEdit,
     handleDelete,
     handleMoveMeal,
     handleQuickAdd,
     handleLogout,
     handleUnauthorized,
   } = useFoodLogs();
+
+  const goDay = (offset: number) => {
+    const d = new Date(selectedDate + "T12:00:00");
+    d.setDate(d.getDate() + offset);
+    setSelectedDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+  };
+
+  const formatDateLabel = (dateStr: string) => {
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
+    if (dateStr === todayStr) return "Today";
+    if (dateStr === yesterdayStr) return "Yesterday";
+    const d = new Date(dateStr + "T12:00:00");
+    return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  };
 
   const health = useHealthMetrics();
   const burn = useBurnLogs();
@@ -178,6 +200,46 @@ export default function FoodEnoughApp() {
           </button>
         </div>
       </header>
+
+      {/* Date Picker */}
+      <div className="flex items-center justify-center gap-3 px-5 py-2">
+        <button onClick={() => goDay(-1)} className="p-2 rounded-xl hover:bg-green-100 transition-colors" aria-label="Previous day">
+          <ChevronLeft className="w-5 h-5 text-green-700" />
+        </button>
+        <button
+          onClick={() => {
+            const input = document.createElement("input");
+            input.type = "date";
+            input.value = selectedDate;
+            input.max = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-${String(new Date().getDate()).padStart(2, "0")}`;
+            input.onchange = (e) => setSelectedDate((e.target as HTMLInputElement).value);
+            input.showPicker?.();
+            input.click();
+          }}
+          className="text-base font-bold text-green-900 hover:text-green-700 transition-colors px-3 py-1 rounded-xl hover:bg-green-50"
+        >
+          {formatDateLabel(selectedDate)}
+        </button>
+        <button
+          onClick={() => goDay(1)}
+          disabled={isToday}
+          className="p-2 rounded-xl hover:bg-green-100 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          aria-label="Next day"
+        >
+          <ChevronRight className="w-5 h-5 text-green-700" />
+        </button>
+        {!isToday && (
+          <button
+            onClick={() => {
+              const t = new Date();
+              setSelectedDate(`${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`);
+            }}
+            className="text-xs font-semibold text-green-600 hover:text-green-800 px-2 py-1 rounded-lg bg-green-50 hover:bg-green-100 transition-colors"
+          >
+            Today
+          </button>
+        )}
+      </div>
 
       <SummaryCard summary={summary} summaryLoading={summaryLoading} todayExpenditure={health.todayMetric?.total_expenditure} />
 
@@ -508,6 +570,7 @@ export default function FoodEnoughApp() {
         deleteError={deleteError}
         exportError={exportError}
         onEditSave={handleEditSave}
+        onDirectEdit={handleDirectEdit}
         onDelete={handleDelete}
         onExport={handleExport}
         onMoveMeal={handleMoveMeal}
