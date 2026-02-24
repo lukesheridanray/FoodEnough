@@ -200,28 +200,20 @@ const WHIMSICAL_STYLES = `
 const NUNITO_LINK = "https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&display=swap";
 
 export default function ThemeToggle() {
-  const [isLocal, setIsLocal] = useState(false);
   const [theme, setTheme] = useState<"baseline" | "whimsical">("baseline");
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const hostname = window.location.hostname;
-    const local = hostname === "localhost" || hostname === "127.0.0.1";
-    setIsLocal(local);
-
-    if (local) {
-      const saved = localStorage.getItem("fe-theme");
-      if (saved === "whimsical") {
-        setTheme("whimsical");
-        document.documentElement.setAttribute("data-theme", "whimsical");
-      }
+    const saved = localStorage.getItem("fe-theme");
+    if (saved === "whimsical") {
+      setTheme("whimsical");
+      document.documentElement.setAttribute("data-theme", "whimsical");
     }
-
     setMounted(true);
   }, []);
 
   useEffect(() => {
-    if (!isLocal) return;
+    if (!mounted) return;
 
     if (theme === "whimsical") {
       document.documentElement.setAttribute("data-theme", "whimsical");
@@ -229,9 +221,9 @@ export default function ThemeToggle() {
       document.documentElement.removeAttribute("data-theme");
     }
     localStorage.setItem("fe-theme", theme);
-  }, [theme, isLocal]);
+  }, [theme, mounted]);
 
-  if (!mounted || !isLocal) return null;
+  if (!mounted) return null;
 
   const toggle = () => setTheme((t) => (t === "baseline" ? "whimsical" : "baseline"));
   const isWhimsical = theme === "whimsical";
