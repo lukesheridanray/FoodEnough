@@ -64,14 +64,26 @@ export default function SummaryCard({ summary, summaryLoading, todayExpenditure 
                   {summary.latest_weight_lbs ? `${summary.latest_weight_lbs} lb` : "\u2014"}
                 </span>
               </div>
-              {todayExpenditure != null && todayExpenditure > 0 && (
+              {(summary.active_calories_today != null && summary.active_calories_today > 0) ? (
+                <div className="text-xs">
+                  <span className="text-gray-400">Active </span>
+                  <span className="font-semibold text-orange-600">
+                    {summary.active_calories_today} kcal
+                  </span>
+                  {summary.burn_log_count_today != null && summary.burn_log_count_today > 0 && (
+                    <span className="ml-1 text-xs text-gray-400">
+                      ({summary.burn_log_count_today} workout{summary.burn_log_count_today > 1 ? "s" : ""})
+                    </span>
+                  )}
+                </div>
+              ) : todayExpenditure != null && todayExpenditure > 0 ? (
                 <div className="text-xs">
                   <span className="text-gray-400">Burn </span>
                   <span className="font-semibold text-orange-600">
                     {Math.round(todayExpenditure)} kcal
                   </span>
                 </div>
-              )}
+              ) : null}
               <div className="text-xs">
                 <span className="text-gray-400">Workout </span>
                 <span className="font-semibold text-gray-700 max-w-[100px] inline-block truncate align-bottom">

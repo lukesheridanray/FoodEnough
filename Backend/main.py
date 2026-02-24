@@ -107,6 +107,7 @@ class User(Base):
     workout_plans = relationship("WorkoutPlan", back_populates="user")
     ani_recalibrations = relationship("ANIRecalibration", back_populates="user")
     health_metrics = relationship("HealthMetric", back_populates="user")
+    burn_logs = relationship("BurnLog", back_populates="user")
 
 
 class FoodLog(Base):
@@ -256,6 +257,26 @@ class HealthMetric(Base):
         # Unique constraint: one row per user per day
         {"sqlite_autoincrement": True},
     )
+
+
+class BurnLog(Base):
+    __tablename__ = "burn_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    workout_type = Column(String, nullable=False, default="other")  # running, weight_training, cycling, swimming, walking, hiit, yoga, other
+    duration_minutes = Column(Integer, nullable=True)
+    calories_burned = Column(Float, nullable=False)
+    avg_heart_rate = Column(Integer, nullable=True)
+    max_heart_rate = Column(Integer, nullable=True)
+    source = Column(String, nullable=False, default="manual")  # manual, plan_session, healthkit, health_connect
+    external_id = Column(String, nullable=True, index=True)  # HealthKit/HC workout UUID for dedup
+    plan_session_id = Column(Integer, ForeignKey("plan_sessions.id"), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    user = relationship("User", back_populates="burn_logs")
 
 
 if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
@@ -622,6 +643,181 @@ def estimate_workout_calories(exercises: list, weight_kg: float) -> dict:
 
 
 # ============================================================
+# Burn Log Schemas & Reaggregation
+# ============================================================
+_VALID_WORKOUT_TYPES = {"running", "weight_training", "cycling", "swimming", "walking", "hiit", "yoga", "other"}
+_VALID_BURN_SOURCES = {"manual", "plan_session", "healthkit", "health_connect"}
+
+
+class BurnLogInput(BaseModel):
+    workout_type: str = "other"
+    duration_minutes: Optional[int] = None
+    calories_burned: float
+    avg_heart_rate: Optional[int] = None
+    max_heart_rate: Optional[int] = None
+    notes: Optional[str] = None
+
+    @field_validator("workout_type")
+    @classmethod
+    def validate_workout_type(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in _VALID_WORKOUT_TYPES:
+            raise ValueError(f"workout_type must be one of: {', '.join(sorted(_VALID_WORKOUT_TYPES))}")
+        return v
+
+    @field_validator("calories_burned")
+    @classmethod
+    def validate_calories(cls, v: float) -> float:
+        if v < 0 or v > 50000:
+            raise ValueError("calories_burned must be between 0 and 50000")
+        return v
+
+    @field_validator("duration_minutes")
+    @classmethod
+    def validate_duration(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and (v < 1 or v > 1440):
+            raise ValueError("duration_minutes must be between 1 and 1440")
+        return v
+
+    @field_validator("avg_heart_rate", "max_heart_rate")
+    @classmethod
+    def validate_heart_rate(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and (v < 30 or v > 250):
+            raise ValueError("heart rate must be between 30 and 250")
+        return v
+
+
+class BurnLogUpdateInput(BaseModel):
+    workout_type: Optional[str] = None
+    duration_minutes: Optional[int] = None
+    calories_burned: Optional[float] = None
+    avg_heart_rate: Optional[int] = None
+    max_heart_rate: Optional[int] = None
+    notes: Optional[str] = None
+
+    @field_validator("workout_type")
+    @classmethod
+    def validate_workout_type(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            v = v.strip().lower()
+            if v not in _VALID_WORKOUT_TYPES:
+                raise ValueError(f"workout_type must be one of: {', '.join(sorted(_VALID_WORKOUT_TYPES))}")
+        return v
+
+    @field_validator("calories_burned")
+    @classmethod
+    def validate_calories(cls, v: Optional[float]) -> Optional[float]:
+        if v is not None and (v < 0 or v > 50000):
+            raise ValueError("calories_burned must be between 0 and 50000")
+        return v
+
+    @field_validator("duration_minutes")
+    @classmethod
+    def validate_duration(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and (v < 1 or v > 1440):
+            raise ValueError("duration_minutes must be between 1 and 1440")
+        return v
+
+    @field_validator("avg_heart_rate", "max_heart_rate")
+    @classmethod
+    def validate_heart_rate(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and (v < 30 or v > 250):
+            raise ValueError("heart rate must be between 30 and 250")
+        return v
+
+
+class HealthSyncBurnEntry(BaseModel):
+    external_id: str
+    timestamp: str  # ISO 8601
+    workout_type: str = "other"
+    duration_minutes: Optional[int] = None
+    calories_burned: float
+    avg_heart_rate: Optional[int] = None
+    max_heart_rate: Optional[int] = None
+
+    @field_validator("calories_burned")
+    @classmethod
+    def validate_calories(cls, v: float) -> float:
+        if v < 0 or v > 50000:
+            raise ValueError("calories_burned must be between 0 and 50000")
+        return v
+
+
+class HealthSyncBatchInput(BaseModel):
+    source: str  # "healthkit" or "health_connect"
+    entries: list
+
+    @field_validator("source")
+    @classmethod
+    def validate_source(cls, v: str) -> str:
+        if v not in ("healthkit", "health_connect"):
+            raise ValueError("source must be 'healthkit' or 'health_connect'")
+        return v
+
+    @field_validator("entries")
+    @classmethod
+    def validate_entries(cls, v: list) -> list:
+        if len(v) > 500:
+            raise ValueError("Maximum 500 entries per batch")
+        return v
+
+
+def _reaggregate_burn_for_date(db: Session, user_id: int, dt: datetime, tz_offset_minutes: int = 0):
+    """Re-sum all BurnLog entries for a given local date into HealthMetric.active_calories."""
+    local_dt = dt + timedelta(minutes=tz_offset_minutes)
+    date_str = local_dt.strftime("%Y-%m-%d")
+
+    # Compute local day boundaries in UTC
+    local_midnight = local_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    utc_start = local_midnight - timedelta(minutes=tz_offset_minutes)
+    utc_end = utc_start + timedelta(days=1)
+
+    total = (
+        db.query(func.coalesce(func.sum(BurnLog.calories_burned), 0.0))
+        .filter(
+            BurnLog.user_id == user_id,
+            BurnLog.timestamp >= utc_start,
+            BurnLog.timestamp < utc_end,
+        )
+        .scalar()
+    )
+
+    existing = (
+        db.query(HealthMetric)
+        .filter(HealthMetric.user_id == user_id, HealthMetric.date == date_str)
+        .first()
+    )
+    if existing:
+        existing.active_calories = round(total, 1) if total > 0 else None
+        existing.updated_at = datetime.utcnow()
+    elif total > 0:
+        db.add(HealthMetric(
+            user_id=user_id,
+            date=date_str,
+            active_calories=round(total, 1),
+            source="burn_log",
+        ))
+
+
+def _burn_log_to_dict(bl: "BurnLog") -> dict:
+    return {
+        "id": bl.id,
+        "timestamp": bl.timestamp.isoformat() if bl.timestamp else None,
+        "workout_type": bl.workout_type,
+        "duration_minutes": bl.duration_minutes,
+        "calories_burned": bl.calories_burned,
+        "avg_heart_rate": bl.avg_heart_rate,
+        "max_heart_rate": bl.max_heart_rate,
+        "source": bl.source,
+        "external_id": bl.external_id,
+        "plan_session_id": bl.plan_session_id,
+        "notes": bl.notes,
+        "created_at": bl.created_at.isoformat() if bl.created_at else None,
+        "updated_at": bl.updated_at.isoformat() if bl.updated_at else None,
+    }
+
+
+# ============================================================
 # ANI Recalibration Engine (pure math, no AI API)
 # ============================================================
 def run_recalibration(
@@ -796,8 +992,28 @@ def run_recalibration(
         neat_estimate = est_goals["tdee"]
         estimated_tdee = est_goals["tdee"]
 
-    # 2b. Compute average daily workout calories from completed plan sessions
-    if plan_sessions and latest_weight_lbs:
+    # 2b. Compute average daily workout calories — prefer BurnLog data, fall back to plan_session re-estimation
+    _used_burn_logs = False
+    if db is not None:
+        try:
+            now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+            period_start_bl = now_utc - timedelta(days=7)
+            burn_total = (
+                db.query(func.coalesce(func.sum(BurnLog.calories_burned), 0.0))
+                .filter(
+                    BurnLog.user_id == user.id,
+                    BurnLog.timestamp >= period_start_bl,
+                    BurnLog.timestamp < now_utc,
+                )
+                .scalar()
+            )
+            if burn_total and burn_total > 0:
+                avg_workout_cal = burn_total / 7.0
+                _used_burn_logs = True
+        except Exception:
+            pass
+
+    if not _used_burn_logs and plan_sessions and latest_weight_lbs:
         weight_kg = latest_weight_lbs * 0.453592
         total_workout_cal = 0.0
         completed_count = 0
@@ -811,7 +1027,6 @@ def run_recalibration(
                 except Exception:
                     pass
         if completed_count > 0:
-            # Spread total workout calories across 7 days for a daily average
             avg_workout_cal = total_workout_cal / 7.0
 
     # 2c. Pull real burn data from health_metrics if available
@@ -2807,6 +3022,19 @@ def get_today_summary(
     effective_calorie_goal = ani_calorie_goal if ani_active else calorie_goal
     calories_remaining = (effective_calorie_goal - calories_today) if effective_calorie_goal is not None else None
 
+    # Burn log data for today
+    today_burn_logs = (
+        db.query(BurnLog)
+        .filter(
+            BurnLog.user_id == current_user.id,
+            BurnLog.timestamp >= utc_start,
+            BurnLog.timestamp < utc_end,
+        )
+        .all()
+    )
+    active_calories_today = round(sum(bl.calories_burned for bl in today_burn_logs))
+    burn_log_count_today = len(today_burn_logs)
+
     return {
         "calories_today": round(calories_today),
         "calorie_goal": calorie_goal,
@@ -2830,6 +3058,8 @@ def get_today_summary(
         "ani_days_logged_7d": ani_days_logged_7d,
         "ani_eligible": ani_eligible,
         "goal_type": current_user.goal_type or "maintain",
+        "active_calories_today": active_calories_today,
+        "burn_log_count_today": burn_log_count_today,
     }
 
 
@@ -3187,7 +3417,7 @@ def complete_plan_session(
     session.is_completed = 1
     session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    # --- Estimate calories burned and auto-log to health_metrics ---
+    # --- Estimate calories burned and create BurnLog ---
     estimated_calories = 0
     try:
         exercises = json.loads(session.exercises_json) if session.exercises_json else []
@@ -3195,7 +3425,6 @@ def complete_plan_session(
         exercises = []
 
     if exercises:
-        # Get user's latest weight
         latest_weight = (
             db.query(WeightEntry)
             .filter(WeightEntry.user_id == current_user.id)
@@ -3207,30 +3436,338 @@ def complete_plan_session(
         result = estimate_workout_calories(exercises, weight_kg)
         estimated_calories = result["estimated_calories"]
 
-        # Resolve today's local date
-        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-        local_now = now_utc + timedelta(minutes=tz_offset_minutes)
-        date_str = local_now.strftime("%Y-%m-%d")
+        # Infer workout_type from session name
+        session_name_lower = (session.name or "").lower()
+        _type_keywords = {
+            "running": "running", "run": "running", "cardio": "running",
+            "cycling": "cycling", "bike": "cycling",
+            "swimming": "swimming", "swim": "swimming",
+            "walking": "walking", "walk": "walking",
+            "hiit": "hiit", "circuit": "hiit", "conditioning": "hiit",
+            "yoga": "yoga", "stretch": "yoga",
+        }
+        workout_type = "weight_training"
+        for kw, wtype in _type_keywords.items():
+            if kw in session_name_lower:
+                workout_type = wtype
+                break
 
-        # Upsert into health_metrics — add to existing active_calories
-        existing = (
-            db.query(HealthMetric)
-            .filter(HealthMetric.user_id == current_user.id, HealthMetric.date == date_str)
-            .first()
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        bl = BurnLog(
+            user_id=current_user.id,
+            timestamp=now_utc,
+            workout_type=workout_type,
+            duration_minutes=result.get("duration_minutes"),
+            calories_burned=estimated_calories,
+            source="plan_session",
+            plan_session_id=session.id,
         )
-        if existing:
-            existing.active_calories = (existing.active_calories or 0) + estimated_calories
-            existing.updated_at = datetime.utcnow()
-        else:
-            db.add(HealthMetric(
-                user_id=current_user.id,
-                date=date_str,
-                active_calories=estimated_calories,
-                source="workout_estimate",
-            ))
+        db.add(bl)
+        db.flush()
+        _reaggregate_burn_for_date(db, current_user.id, now_utc, tz_offset_minutes)
 
     db.commit()
     return {"status": "completed", "estimated_calories": estimated_calories}
+
+
+# ============================================================
+# Burn Log CRUD
+# ============================================================
+
+# POST /burn-logs  — create manual burn entry
+@app.post("/burn-logs")
+@limiter.limit("30/minute")
+def create_burn_log(
+    request: Request,
+    body: BurnLogInput,
+    tz_offset_minutes: int = Query(default=0, ge=-720, le=840),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    bl = BurnLog(
+        user_id=current_user.id,
+        timestamp=now_utc,
+        workout_type=body.workout_type,
+        duration_minutes=body.duration_minutes,
+        calories_burned=body.calories_burned,
+        avg_heart_rate=body.avg_heart_rate,
+        max_heart_rate=body.max_heart_rate,
+        source="manual",
+        notes=body.notes,
+    )
+    db.add(bl)
+    db.flush()
+    _reaggregate_burn_for_date(db, current_user.id, now_utc, tz_offset_minutes)
+    db.commit()
+    db.refresh(bl)
+    return {"burn_log": _burn_log_to_dict(bl)}
+
+
+# GET /burn-logs/today  — today's burn entries
+@app.get("/burn-logs/today")
+@limiter.limit("60/minute")
+def get_burn_logs_today(
+    request: Request,
+    tz_offset_minutes: int = Query(default=0, ge=-720, le=840),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    local_now = now_utc + timedelta(minutes=tz_offset_minutes)
+    local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    utc_start = local_midnight - timedelta(minutes=tz_offset_minutes)
+    utc_end = utc_start + timedelta(days=1)
+
+    logs = (
+        db.query(BurnLog)
+        .filter(
+            BurnLog.user_id == current_user.id,
+            BurnLog.timestamp >= utc_start,
+            BurnLog.timestamp < utc_end,
+        )
+        .order_by(BurnLog.timestamp.desc())
+        .all()
+    )
+    return {"burn_logs": [_burn_log_to_dict(bl) for bl in logs]}
+
+
+# GET /burn-logs/week  — 7-day burn entries
+@app.get("/burn-logs/week")
+@limiter.limit("60/minute")
+def get_burn_logs_week(
+    request: Request,
+    offset_days: int = Query(default=0, ge=0, le=365),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    end = now_utc - timedelta(days=offset_days)
+    start = end - timedelta(days=7)
+
+    logs = (
+        db.query(BurnLog)
+        .filter(
+            BurnLog.user_id == current_user.id,
+            BurnLog.timestamp >= start,
+            BurnLog.timestamp < end,
+        )
+        .order_by(BurnLog.timestamp.desc())
+        .all()
+    )
+    return {"burn_logs": [_burn_log_to_dict(bl) for bl in logs]}
+
+
+# PUT /burn-logs/{id}  — update a burn entry (manual source only)
+@app.put("/burn-logs/{burn_log_id}")
+@limiter.limit("30/minute")
+def update_burn_log(
+    request: Request,
+    burn_log_id: int,
+    body: BurnLogUpdateInput,
+    tz_offset_minutes: int = Query(default=0, ge=-720, le=840),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    bl = (
+        db.query(BurnLog)
+        .filter(BurnLog.id == burn_log_id, BurnLog.user_id == current_user.id)
+        .first()
+    )
+    if not bl:
+        raise HTTPException(status_code=404, detail="Burn log not found")
+    if bl.source != "manual":
+        raise HTTPException(status_code=403, detail="Only manual burn logs can be edited")
+
+    if body.workout_type is not None:
+        bl.workout_type = body.workout_type
+    if body.duration_minutes is not None:
+        bl.duration_minutes = body.duration_minutes
+    if body.calories_burned is not None:
+        bl.calories_burned = body.calories_burned
+    if body.avg_heart_rate is not None:
+        bl.avg_heart_rate = body.avg_heart_rate
+    if body.max_heart_rate is not None:
+        bl.max_heart_rate = body.max_heart_rate
+    if body.notes is not None:
+        bl.notes = body.notes
+    bl.updated_at = datetime.utcnow()
+
+    _reaggregate_burn_for_date(db, current_user.id, bl.timestamp, tz_offset_minutes)
+    db.commit()
+    db.refresh(bl)
+    return {"burn_log": _burn_log_to_dict(bl)}
+
+
+# DELETE /burn-logs/{id}  — delete + reaggregate
+@app.delete("/burn-logs/{burn_log_id}")
+@limiter.limit("30/minute")
+def delete_burn_log(
+    request: Request,
+    burn_log_id: int,
+    tz_offset_minutes: int = Query(default=0, ge=-720, le=840),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    bl = (
+        db.query(BurnLog)
+        .filter(BurnLog.id == burn_log_id, BurnLog.user_id == current_user.id)
+        .first()
+    )
+    if not bl:
+        raise HTTPException(status_code=404, detail="Burn log not found")
+    if bl.source not in ("manual", "plan_session"):
+        raise HTTPException(status_code=403, detail="Only manual and plan_session burn logs can be deleted")
+
+    ts = bl.timestamp
+    db.delete(bl)
+    db.flush()
+    _reaggregate_burn_for_date(db, current_user.id, ts, tz_offset_minutes)
+    db.commit()
+    return {"status": "deleted"}
+
+
+# GET /burn-logs/export  — CSV export
+@app.get("/burn-logs/export")
+@limiter.limit("10/minute")
+def export_burn_logs(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    logs = (
+        db.query(BurnLog)
+        .filter(BurnLog.user_id == current_user.id)
+        .order_by(BurnLog.timestamp.desc())
+        .all()
+    )
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["timestamp", "workout_type", "duration_minutes", "calories_burned", "avg_heart_rate", "max_heart_rate", "source", "notes"])
+    for bl in logs:
+        writer.writerow([
+            bl.timestamp.isoformat() if bl.timestamp else "",
+            bl.workout_type,
+            bl.duration_minutes or "",
+            bl.calories_burned,
+            bl.avg_heart_rate or "",
+            bl.max_heart_rate or "",
+            bl.source,
+            bl.notes or "",
+        ])
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=burn_logs.csv"},
+    )
+
+
+# POST /burn-logs/sync  — batch import from HealthKit/Health Connect
+@app.post("/burn-logs/sync")
+@limiter.limit("10/minute")
+def sync_burn_logs(
+    request: Request,
+    body: HealthSyncBatchInput,
+    tz_offset_minutes: int = Query(default=0, ge=-720, le=840),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Bulk-fetch existing external_ids for dedup
+    incoming_ext_ids = [e["external_id"] for e in body.entries if isinstance(e, dict) and e.get("external_id")]
+    existing_ext_ids = set()
+    if incoming_ext_ids:
+        existing = (
+            db.query(BurnLog.external_id)
+            .filter(
+                BurnLog.user_id == current_user.id,
+                BurnLog.external_id.in_(incoming_ext_ids),
+            )
+            .all()
+        )
+        existing_ext_ids = {r[0] for r in existing}
+
+    created = 0
+    skipped = 0
+    affected_dates: set = set()
+
+    for entry_data in body.entries:
+        if not isinstance(entry_data, dict):
+            skipped += 1
+            continue
+        ext_id = entry_data.get("external_id")
+        if not ext_id:
+            skipped += 1
+            continue
+        if ext_id in existing_ext_ids:
+            skipped += 1
+            continue
+
+        try:
+            ts = datetime.fromisoformat(entry_data["timestamp"].replace("Z", "+00:00")).replace(tzinfo=None)
+        except (KeyError, ValueError):
+            skipped += 1
+            continue
+
+        cals = entry_data.get("calories_burned", 0)
+        if not isinstance(cals, (int, float)) or cals < 0 or cals > 50000:
+            skipped += 1
+            continue
+
+        wtype = entry_data.get("workout_type", "other")
+        if wtype not in _VALID_WORKOUT_TYPES:
+            wtype = "other"
+
+        bl = BurnLog(
+            user_id=current_user.id,
+            timestamp=ts,
+            workout_type=wtype,
+            duration_minutes=entry_data.get("duration_minutes"),
+            calories_burned=cals,
+            avg_heart_rate=entry_data.get("avg_heart_rate"),
+            max_heart_rate=entry_data.get("max_heart_rate"),
+            source=body.source,
+            external_id=ext_id,
+        )
+        db.add(bl)
+        existing_ext_ids.add(ext_id)
+        affected_dates.add(ts)
+        created += 1
+
+    db.flush()
+    for dt in affected_dates:
+        _reaggregate_burn_for_date(db, current_user.id, dt, tz_offset_minutes)
+    db.commit()
+
+    return {"created": created, "skipped": skipped}
+
+
+# GET /burn-logs/sync/latest  — export for two-way sync
+@app.get("/burn-logs/sync/latest")
+@limiter.limit("30/minute")
+def sync_burn_logs_latest(
+    request: Request,
+    since: Optional[str] = Query(default=None),
+    source: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    query = db.query(BurnLog).filter(BurnLog.user_id == current_user.id)
+
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since.replace("Z", "+00:00")).replace(tzinfo=None)
+            query = query.filter(BurnLog.updated_at >= since_dt)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid 'since' datetime format")
+
+    if source:
+        sources = [s.strip() for s in source.split(",") if s.strip() in _VALID_BURN_SOURCES]
+        if sources:
+            query = query.filter(BurnLog.source.in_(sources))
+
+    logs = query.order_by(BurnLog.timestamp.desc()).limit(500).all()
+    return {"burn_logs": [_burn_log_to_dict(bl) for bl in logs]}
 
 
 # ============================================================

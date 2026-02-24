@@ -24,6 +24,8 @@ interface Summary {
   ani_days_logged_7d?: number;
   ani_eligible?: boolean;
   goal_type?: "lose" | "maintain" | "gain";
+  active_calories_today?: number;
+  burn_log_count_today?: number;
 }
 
 interface ImageItem {

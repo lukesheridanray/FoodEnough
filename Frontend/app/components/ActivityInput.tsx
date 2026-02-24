@@ -11,7 +11,6 @@ interface ActivityInputProps {
   saveSuccess: boolean;
   onSave: (data: {
     total_expenditure?: number;
-    active_calories?: number;
     steps?: number;
   }) => void;
 }
@@ -26,14 +25,12 @@ export default function ActivityInput({
 }: ActivityInputProps) {
   const [expanded, setExpanded] = useState(false);
   const [totalExp, setTotalExp] = useState("");
-  const [activeCal, setActiveCal] = useState("");
   const [steps, setSteps] = useState("");
 
   // Pre-populate from existing today data
   useEffect(() => {
     if (todayMetric) {
       if (todayMetric.total_expenditure != null) setTotalExp(String(todayMetric.total_expenditure));
-      if (todayMetric.active_calories != null) setActiveCal(String(todayMetric.active_calories));
       if (todayMetric.steps != null) setSteps(String(todayMetric.steps));
     }
   }, [todayMetric]);
@@ -41,7 +38,6 @@ export default function ActivityInput({
   const handleSave = () => {
     const data: Record<string, number> = {};
     if (totalExp.trim()) data.total_expenditure = parseFloat(totalExp);
-    if (activeCal.trim()) data.active_calories = parseFloat(activeCal);
     if (steps.trim()) data.steps = parseInt(steps, 10);
     if (Object.keys(data).length === 0) return;
     onSave(data);
@@ -49,7 +45,6 @@ export default function ActivityInput({
 
   const hasData = todayMetric && (
     todayMetric.total_expenditure != null ||
-    todayMetric.active_calories != null ||
     todayMetric.steps != null
   );
 
@@ -101,21 +96,6 @@ export default function ActivityInput({
             </div>
 
             <div>
-              <label className="text-xs text-gray-500 mb-1 block">Active Calories (kcal)</label>
-              <div className="relative">
-                <Flame className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-red-400" />
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  placeholder="e.g. 600"
-                  value={activeCal}
-                  onChange={(e) => setActiveCal(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-orange-300 focus:outline-none"
-                />
-              </div>
-            </div>
-
-            <div>
               <label className="text-xs text-gray-500 mb-1 block">Steps</label>
               <div className="relative">
                 <Footprints className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-400" />
@@ -134,7 +114,7 @@ export default function ActivityInput({
 
             <button
               onClick={handleSave}
-              disabled={saving || saveSuccess || (!totalExp.trim() && !activeCal.trim() && !steps.trim())}
+              disabled={saving || saveSuccess || (!totalExp.trim() && !steps.trim())}
               className={`w-full py-2 text-sm font-medium rounded-xl shadow-sm flex items-center justify-center gap-1.5 transition-colors ${
                 saveSuccess
                   ? "bg-green-100 text-green-700"

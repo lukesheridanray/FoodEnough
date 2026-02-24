@@ -6,7 +6,7 @@ import { getToken, formatDate } from "../../lib/auth";
 import { apiFetch, UnauthorizedError } from "../../lib/api";
 import Link from "next/link";
 import BottomNav from "../components/BottomNav";
-import { Flame, Footprints, BarChart3 } from "lucide-react";
+import { Flame, Footprints, BarChart3, Heart } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -69,6 +69,27 @@ interface HealthMetricDay {
   steps: number | null;
 }
 
+interface BurnLogEntry {
+  id: number;
+  timestamp: string;
+  workout_type: string;
+  duration_minutes: number | null;
+  calories_burned: number;
+  avg_heart_rate: number | null;
+  source: string;
+}
+
+const WORKOUT_TYPE_LABELS: Record<string, { label: string; emoji: string }> = {
+  running: { label: "Running", emoji: "\ud83c\udfc3" },
+  weight_training: { label: "Weights", emoji: "\ud83c\udfcb\ufe0f" },
+  cycling: { label: "Cycling", emoji: "\ud83d\udeb4" },
+  swimming: { label: "Swimming", emoji: "\ud83c\udfca" },
+  walking: { label: "Walking", emoji: "\ud83d\udeb6" },
+  hiit: { label: "HIIT", emoji: "\u26a1" },
+  yoga: { label: "Yoga", emoji: "\ud83e\uddd8" },
+  other: { label: "Other", emoji: "\ud83d\udcaa" },
+};
+
 export default function DiaryPage() {
   const [dailyLogs, setDailyLogs] = useState<DailyGroup[]>([]);
   const [weekTotal, setWeekTotal] = useState<WeekTotal>({
@@ -80,6 +101,7 @@ export default function DiaryPage() {
   const [weekOffset, setWeekOffset] = useState(0);
   const [expandedEntries, setExpandedEntries] = useState<Record<string, boolean>>({});
   const [healthMetrics, setHealthMetrics] = useState<Record<string, HealthMetricDay>>({});
+  const [burnLogsByDate, setBurnLogsByDate] = useState<Record<string, BurnLogEntry[]>>({});
   const router = useRouter();
 
   useEffect(() => {
@@ -157,9 +179,12 @@ export default function DiaryPage() {
         setDailyLogs(output);
         setWeekTotal(totals);
 
-        // Fetch health metrics for same week
+        // Fetch health metrics and burn logs for same week
         try {
-          const healthRes = await apiFetch(`/health/week?offset_days=${weekOffset * 7}`);
+          const [healthRes, burnRes] = await Promise.all([
+            apiFetch(`/health/week?offset_days=${weekOffset * 7}`),
+            apiFetch(`/burn-logs/week?offset_days=${weekOffset * 7}`),
+          ]);
           if (healthRes.ok) {
             const healthData = await healthRes.json();
             const metricsMap: Record<string, HealthMetricDay> = {};
@@ -169,6 +194,17 @@ export default function DiaryPage() {
               }
             }
             setHealthMetrics(metricsMap);
+          }
+          if (burnRes.ok) {
+            const burnData = await burnRes.json();
+            const burnMap: Record<string, BurnLogEntry[]> = {};
+            for (const bl of burnData.burn_logs || []) {
+              const ts = bl.timestamp.endsWith("Z") ? bl.timestamp : bl.timestamp + "Z";
+              const dateKey = new Date(ts).toISOString().slice(0, 10);
+              if (!burnMap[dateKey]) burnMap[dateKey] = [];
+              burnMap[dateKey].push(bl);
+            }
+            setBurnLogsByDate(burnMap);
           }
         } catch {
           // non-critical, ignore
@@ -337,19 +373,38 @@ export default function DiaryPage() {
                 {group.total.sugar  > 0 && <span className="text-xs px-1.5 py-0.5 bg-pink-50 text-pink-600 rounded-md font-semibold">{Math.round(group.total.sugar)}g sugar</span>}
                 {group.total.sodium > 0 && <span className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded-md font-semibold">{Math.round(group.total.sodium)}mg Na</span>}
               </div>
-              {/* Activity data for this day */}
+              {/* Burn log entries for this day */}
+              {burnLogsByDate[group.isoDate] && burnLogsByDate[group.isoDate].length > 0 && (
+                <div className="mt-2 pt-2 border-t border-gray-50">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Activity</p>
+                  <div className="space-y-1.5">
+                    {burnLogsByDate[group.isoDate].map((bl) => {
+                      const typeInfo = WORKOUT_TYPE_LABELS[bl.workout_type] || WORKOUT_TYPE_LABELS.other;
+                      return (
+                        <div key={bl.id} className="flex items-center gap-2 text-xs text-gray-600">
+                          <span>{typeInfo.emoji}</span>
+                          <span className="font-medium">{typeInfo.label}</span>
+                          <span className="text-orange-600 font-semibold">{Math.round(bl.calories_burned)} kcal</span>
+                          {bl.duration_minutes != null && <span className="text-gray-400">{bl.duration_minutes} min</span>}
+                          {bl.avg_heart_rate != null && (
+                            <span className="flex items-center gap-0.5 text-gray-400">
+                              <Heart className="w-3 h-3 text-red-400" />
+                              {bl.avg_heart_rate}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {/* Device activity data for this day */}
               {healthMetrics[group.isoDate] && (
                 <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
-                  {healthMetrics[group.isoDate].active_calories != null && (
+                  {healthMetrics[group.isoDate].total_expenditure != null && (
                     <span className="flex items-center gap-1">
                       <Flame className="w-3 h-3 text-orange-400" />
-                      Active: {healthMetrics[group.isoDate].active_calories} kcal
-                    </span>
-                  )}
-                  {healthMetrics[group.isoDate].total_expenditure != null && !healthMetrics[group.isoDate].active_calories && (
-                    <span className="flex items-center gap-1">
-                      <Flame className="w-3 h-3 text-orange-400" />
-                      Burn: {healthMetrics[group.isoDate].total_expenditure} kcal
+                      Total burn: {healthMetrics[group.isoDate].total_expenditure} kcal
                     </span>
                   )}
                   {healthMetrics[group.isoDate].steps != null && (

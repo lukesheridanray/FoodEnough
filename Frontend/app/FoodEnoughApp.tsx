@@ -10,8 +10,11 @@ import PhotoInputTab from "./components/PhotoInputTab";
 import ManualInputTab from "./components/ManualInputTab";
 import LogList from "./components/LogList";
 import ActivityInput from "./components/ActivityInput";
+import BurnLogForm from "./components/BurnLogForm";
+import BurnLogList from "./components/BurnLogList";
 import { useFoodLogs, BarcodeResult } from "./hooks/useFoodLogs";
 import { useHealthMetrics } from "./hooks/useHealthMetrics";
+import { useBurnLogs } from "./hooks/useBurnLogs";
 import { apiFetch, UnauthorizedError } from "../lib/api";
 import { getTzOffsetMinutes } from "../lib/auth";
 
@@ -45,6 +48,7 @@ export default function FoodEnoughApp() {
   } = useFoodLogs();
 
   const health = useHealthMetrics();
+  const burn = useBurnLogs();
 
   const [inputTab, setInputTab] = useState<"text" | "photo" | "barcode" | "manual">("text");
   const [barcodeScannerOpen, setBarcodeScannerOpen] = useState(false);
@@ -260,6 +264,27 @@ export default function FoodEnoughApp() {
         saveError={health.saveError}
         saveSuccess={health.saveSuccess}
         onSave={health.saveDaily}
+      />
+
+      <BurnLogForm
+        onSubmit={async (input) => {
+          const ok = await burn.createBurnLog(input);
+          if (ok) loadSummary();
+          return ok;
+        }}
+        error={burn.createError}
+        onErrorClear={() => burn.setCreateError("")}
+      />
+
+      <BurnLogList
+        burnLogs={burn.burnLogs}
+        loading={burn.loading}
+        deleteError={burn.deleteError}
+        onDelete={async (id) => {
+          const ok = await burn.deleteBurnLog(id);
+          if (ok) loadSummary();
+          return ok;
+        }}
       />
 
       {/* ANI progress nudge */}
