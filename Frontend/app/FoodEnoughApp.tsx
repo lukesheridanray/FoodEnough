@@ -572,7 +572,7 @@ export default function FoodEnoughApp() {
                         <td className="text-right px-2 py-1.5 font-semibold">{scaledBarcode.carbs}g</td>
                       </tr>
                       <tr className="text-gray-700">
-                        <td className="px-3 py-1.5 text-orange-600">Fat</td>
+                        <td className="px-3 py-1.5 text-red-600">Fat</td>
                         <td className="text-right px-2 py-1.5 font-semibold">{scaledBarcode.fat}g</td>
                       </tr>
                       {scaledBarcode.fiber != null && (

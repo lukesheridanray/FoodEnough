@@ -53,8 +53,8 @@ export default function GoalProgress({ todaySummary, goalType }: GoalProgressPro
                 label: "Fat",
                 value: todaySummary.fat_today,
                 goal: effectiveFatGoal,
-                bar: "bg-orange-500",
-                text: "text-orange-600",
+                bar: "bg-red-500",
+                text: "text-red-600",
                 unit: "g",
               },
             ].map((item) => {

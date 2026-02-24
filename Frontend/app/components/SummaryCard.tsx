@@ -127,7 +127,7 @@ export default function SummaryCard({ summary, summaryLoading, todayExpenditure 
               {[
                 { label: "Protein", value: summary.protein_today, goal: effectiveProGoal, barColor: "bg-blue-500", textColor: "text-blue-600" },
                 { label: "Carbs", value: summary.carbs_today, goal: effectiveCarbsGoal, barColor: "bg-amber-500", textColor: "text-amber-600" },
-                { label: "Fat", value: summary.fat_today, goal: effectiveFatGoal, barColor: "bg-orange-500", textColor: "text-orange-600" },
+                { label: "Fat", value: summary.fat_today, goal: effectiveFatGoal, barColor: "bg-red-500", textColor: "text-red-600" },
               ].map((macro) => (
                 <div key={macro.label} className="flex-1">
                   <div className="flex justify-between items-baseline mb-0.5">

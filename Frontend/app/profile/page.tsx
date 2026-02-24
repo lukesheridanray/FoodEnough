@@ -147,7 +147,7 @@ export default function ProfilePage() {
                 { label: "Cal", value: p.calorieGoal || "\u2014", unit: "", color: "text-green-700", bg: "bg-green-50" },
                 { label: "Protein", value: p.proteinGoal || "\u2014", unit: "g", color: "text-blue-600", bg: "bg-blue-50" },
                 { label: "Carbs", value: p.carbsGoal || "\u2014", unit: "g", color: "text-amber-600", bg: "bg-amber-50" },
-                { label: "Fat", value: p.fatGoal || "\u2014", unit: "g", color: "text-orange-600", bg: "bg-orange-50" },
+                { label: "Fat", value: p.fatGoal || "\u2014", unit: "g", color: "text-red-600", bg: "bg-red-50" },
               ].map((item) => (
                 <div key={item.label} className={`${item.bg} rounded-xl p-2.5 text-center`}>
                   <p className={`text-base font-bold ${item.color}`}>{item.value}{item.unit && typeof item.value === 'string' && item.value !== "\u2014" ? "" : ""}{typeof item.value !== 'string' ? item.unit : ""}</p>

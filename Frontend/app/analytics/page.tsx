@@ -170,7 +170,7 @@ export default function AnalyticsPage() {
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Bar dataKey="avg_protein" fill="#3b82f6" name="Protein" stackId="macros" />
                   <Bar dataKey="avg_carbs" fill="#f59e0b" name="Carbs" stackId="macros" />
-                  <Bar dataKey="avg_fat" fill="#f97316" name="Fat" stackId="macros" />
+                  <Bar dataKey="avg_fat" fill="#ef4444" name="Fat" stackId="macros" />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -297,7 +297,7 @@ export default function AnalyticsPage() {
                     <div className="mt-1 space-y-0.5">
                       <p className="text-xs text-blue-600">{data.avg_protein}g protein</p>
                       <p className="text-xs text-amber-600">{data.avg_carbs}g carbs</p>
-                      <p className="text-xs text-orange-600">{data.avg_fat}g fat</p>
+                      <p className="text-xs text-red-600">{data.avg_fat}g fat</p>
                       <p className="text-xs text-gray-400 mt-1">{data.days_logged} days logged</p>
                     </div>
                   </div>

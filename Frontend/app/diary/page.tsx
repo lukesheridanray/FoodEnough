@@ -332,7 +332,7 @@ export default function DiaryPage() {
                     <div className="flex flex-wrap gap-1.5 mt-1">
                       <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded-md font-medium">{entry.protein}g P</span>
                       <span className="text-xs px-1.5 py-0.5 bg-amber-50 text-amber-600 rounded-md font-medium">{entry.carbs}g C</span>
-                      <span className="text-xs px-1.5 py-0.5 bg-orange-50 text-orange-600 rounded-md font-medium">{entry.fat}g F</span>
+                      <span className="text-xs px-1.5 py-0.5 bg-red-50 text-red-600 rounded-md font-medium">{entry.fat}g F</span>
                       {hasExtended && <>
                         {entry.fiber  != null && <span className="text-xs px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded-md font-medium">{entry.fiber}g fiber</span>}
                         {entry.sugar  != null && <span className="text-xs px-1.5 py-0.5 bg-pink-50 text-pink-600 rounded-md font-medium">{entry.sugar}g sugar</span>}
@@ -350,7 +350,7 @@ export default function DiaryPage() {
                               {item.calories} kcal ·{" "}
                               <span className="text-blue-400">{item.protein}g P</span> ·{" "}
                               <span className="text-amber-400">{item.carbs}g C</span> ·{" "}
-                              <span className="text-orange-400">{item.fat}g F</span>
+                              <span className="text-red-400">{item.fat}g F</span>
                             </span>
                           </li>
                         ))}
@@ -368,7 +368,7 @@ export default function DiaryPage() {
                 <span className="text-sm font-bold text-green-700">{group.total.calories} kcal</span>
                 <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded-md font-semibold">{Math.round(group.total.protein)}g P</span>
                 <span className="text-xs px-1.5 py-0.5 bg-amber-50 text-amber-600 rounded-md font-semibold">{Math.round(group.total.carbs)}g C</span>
-                <span className="text-xs px-1.5 py-0.5 bg-orange-50 text-orange-600 rounded-md font-semibold">{Math.round(group.total.fat)}g F</span>
+                <span className="text-xs px-1.5 py-0.5 bg-red-50 text-red-600 rounded-md font-semibold">{Math.round(group.total.fat)}g F</span>
                 {group.total.fiber  > 0 && <span className="text-xs px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded-md font-semibold">{Math.round(group.total.fiber)}g fiber</span>}
                 {group.total.sugar  > 0 && <span className="text-xs px-1.5 py-0.5 bg-pink-50 text-pink-600 rounded-md font-semibold">{Math.round(group.total.sugar)}g sugar</span>}
                 {group.total.sodium > 0 && <span className="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded-md font-semibold">{Math.round(group.total.sodium)}mg Na</span>}
@@ -455,7 +455,7 @@ export default function DiaryPage() {
                   { label: "Calories", value: weekTotal.calories, unit: "kcal", dot: "bg-green-500",   text: "text-green-700",   always: true  },
                   { label: "Protein",  value: weekTotal.protein,  unit: "g",    dot: "bg-blue-500",    text: "text-blue-600",   always: true  },
                   { label: "Carbs",    value: weekTotal.carbs,    unit: "g",    dot: "bg-amber-500",   text: "text-amber-600",  always: true  },
-                  { label: "Fat",      value: weekTotal.fat,      unit: "g",    dot: "bg-orange-500",  text: "text-orange-600", always: true  },
+                  { label: "Fat",      value: weekTotal.fat,      unit: "g",    dot: "bg-red-500",  text: "text-red-600", always: true  },
                   { label: "Fiber",    value: weekTotal.fiber,    unit: "g",    dot: "bg-emerald-500", text: "text-emerald-600", always: hasFiberData  },
                   { label: "Sugar",    value: weekTotal.sugar,    unit: "g",    dot: "bg-pink-400",    text: "text-pink-600",   always: hasSugarData  },
                   { label: "Sodium",   value: weekTotal.sodium,   unit: "mg",   dot: "bg-gray-400",    text: "text-gray-600",   always: hasSodiumData },

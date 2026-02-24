@@ -260,7 +260,7 @@ export default function PhotoInputTab({ onLogged, onUnauthorized }: PhotoInputTa
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-orange-500 mb-0.5 font-medium">Fat</label>
+                  <label className="block text-xs text-red-500 mb-0.5 font-medium">Fat</label>
                   <input
                     type="number"
                     min="0"

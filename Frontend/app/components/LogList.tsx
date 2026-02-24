@@ -119,9 +119,9 @@ function EditForm({
             className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-center focus:ring-2 focus:ring-amber-500 focus:outline-none" />
         </div>
         <div>
-          <label className="text-[10px] font-medium text-orange-400 block mb-0.5">Fat</label>
+          <label className="text-[10px] font-medium text-red-400 block mb-0.5">Fat</label>
           <input type="number" value={fat} onChange={(e) => setFat(e.target.value)}
-            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-center focus:ring-2 focus:ring-orange-500 focus:outline-none" />
+            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-center focus:ring-2 focus:ring-red-500 focus:outline-none" />
         </div>
       </div>
 
@@ -221,7 +221,7 @@ function LogCard({
                 <span className="text-base font-bold text-green-700">{log.calories} kcal</span>
                 <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded-md font-medium">{log.protein}g P</span>
                 <span className="text-xs px-1.5 py-0.5 bg-amber-50 text-amber-600 rounded-md font-medium">{log.carbs}g C</span>
-                <span className="text-xs px-1.5 py-0.5 bg-orange-50 text-orange-600 rounded-md font-medium">{log.fat}g F</span>
+                <span className="text-xs px-1.5 py-0.5 bg-red-50 text-red-600 rounded-md font-medium">{log.fat}g F</span>
               </div>
               {(log.fiber != null || log.sugar != null || log.sodium != null) && (
                 <div className="flex items-center gap-1.5 mt-1 flex-wrap">
@@ -276,7 +276,7 @@ function LogCard({
                       <span className="font-semibold text-green-700">{item.calories} kcal</span>
                       <span className="text-blue-500">{item.protein}g P</span>
                       <span className="text-amber-500">{item.carbs}g C</span>
-                      <span className="text-orange-500">{item.fat}g F</span>
+                      <span className="text-red-500">{item.fat}g F</span>
                     </span>
                   </li>
                 ))}
