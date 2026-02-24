@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
 import {
   Brain,
   TrendingUp,
@@ -196,6 +197,9 @@ export default function ANIDashboard({ targets, history, insights, recalibrating
           </button>
           {recalError && <p className="text-red-500 text-sm mt-2">{recalError}</p>}
           <p className="text-xs text-gray-400 mt-3">Requires 7 days of food logging</p>
+          <Link href="/ani/how-it-works" className="block text-sm text-amber-600 font-medium mt-4 hover:underline">
+            Learn how ANI works &rarr;
+          </Link>
         </div>
       </section>
     );
@@ -208,6 +212,13 @@ export default function ANIDashboard({ targets, history, insights, recalibrating
 
   return (
     <div className="space-y-4">
+
+      {/* ─── How it works link ─── */}
+      <div className="px-5">
+        <Link href="/ani/how-it-works" className="text-xs text-amber-600 font-medium hover:underline">
+          How does this work? &rarr;
+        </Link>
+      </div>
 
       {/* ─── 1. Weight Trend Signal Card (PRIMARY) ─── */}
       <section className="px-5">

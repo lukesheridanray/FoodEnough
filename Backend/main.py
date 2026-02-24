@@ -2829,6 +2829,7 @@ def get_today_summary(
         "ani_fat_goal": ani_fat_goal,
         "ani_days_logged_7d": ani_days_logged_7d,
         "ani_eligible": ani_eligible,
+        "goal_type": current_user.goal_type or "maintain",
     }
 
 

@@ -38,6 +38,7 @@ export default function FoodEnoughApp() {
     handleExport,
     handleEditSave,
     handleDelete,
+    handleMoveMeal,
     handleQuickAdd,
     handleLogout,
     handleUnauthorized,
@@ -175,6 +176,82 @@ export default function FoodEnoughApp() {
       </header>
 
       <SummaryCard summary={summary} summaryLoading={summaryLoading} todayExpenditure={health.todayMetric?.total_expenditure} />
+
+      {/* Today's Recommendations */}
+      {summary && (summary.calorie_goal || summary.protein_goal) && (() => {
+        const goalType = summary.goal_type ?? "maintain";
+        const effectiveCalGoal = (summary.ani_active && summary.ani_calorie_goal)
+          ? summary.ani_calorie_goal : summary.calorie_goal;
+        const effectiveProGoal = (summary.ani_active && summary.ani_protein_goal)
+          ? summary.ani_protein_goal : summary.protein_goal;
+        const cal = summary.calories_today;
+        const pro = summary.protein_today;
+        const carb = summary.carbs_today;
+        const calGoal = effectiveCalGoal;
+        const proGoal = effectiveProGoal;
+        const carbGoal = (summary.ani_active && summary.ani_carbs_goal)
+          ? summary.ani_carbs_goal : summary.carbs_goal;
+        const calRem = calGoal ? calGoal - cal : null;
+
+        const tips: { icon: string; text: string; color: string }[] = [];
+
+        if (cal === 0) {
+          tips.push({ icon: "\ud83c\udf7d", text: "Log your first meal to start tracking today's progress.", color: "text-gray-600" });
+        }
+
+        if (calGoal && calRem !== null) {
+          if (calRem < -200) {
+            tips.push({ icon: "\u26a0\ufe0f", text: `You're ${Math.abs(calRem)} kcal over your goal \u2014 consider a lighter dinner.`, color: "text-red-600" });
+          } else if (calRem < 100) {
+            tips.push({ icon: "\u2705", text: "Calorie goal hit for today \u2014 great work.", color: "text-green-600" });
+          } else if (goalType === "gain" && calRem > 300) {
+            tips.push({ icon: "\ud83d\udcc8", text: `You still need ${calRem} kcal to hit your surplus \u2014 don't skip a meal.`, color: "text-orange-600" });
+          } else if (goalType === "lose" && calRem > 0) {
+            tips.push({ icon: "\ud83c\udfaf", text: `${calRem} kcal remaining \u2014 you're on track for your deficit.`, color: "text-blue-600" });
+          } else if (goalType === "maintain" && calRem > 0) {
+            tips.push({ icon: "\u2696\ufe0f", text: `${calRem} kcal remaining to hit your maintenance target.`, color: "text-green-700" });
+          }
+        }
+
+        if (proGoal && pro > 0) {
+          const proteinPct = Math.round((pro / proGoal) * 100);
+          if (proteinPct >= 100) {
+            tips.push({ icon: "\ud83d\udcaa", text: "Protein goal hit \u2014 your muscles are taken care of.", color: "text-blue-600" });
+          } else if (proteinPct < 50 && cal > (calGoal ?? 0) * 0.5) {
+            tips.push({ icon: "\ud83e\udd69", text: `Protein is at ${proteinPct}% \u2014 add a lean protein source to your next meal.`, color: "text-blue-600" });
+          }
+        } else if (proGoal && pro === 0 && cal > 0) {
+          tips.push({ icon: "\ud83e\udd69", text: "No protein tracked yet \u2014 prioritise a protein source at your next meal.", color: "text-blue-600" });
+        }
+
+        if (goalType === "lose" && proGoal && pro >= proGoal * 0.8) {
+          tips.push({ icon: "\ud83c\udfc6", text: "High protein is helping preserve muscle while you cut \u2014 keep it up.", color: "text-green-600" });
+        }
+
+        if (goalType === "gain" && carbGoal && carb < carbGoal * 0.5 && cal > 0) {
+          tips.push({ icon: "\ud83c\udf5a", text: "Carbs are low for a muscle-building day \u2014 fuel your training.", color: "text-amber-600" });
+        }
+
+        if (tips.length === 0) {
+          tips.push({ icon: "\u2728", text: "Everything on track \u2014 keep logging to stay consistent.", color: "text-green-600" });
+        }
+
+        return (
+          <section className="px-5 mt-3">
+            <div className="bg-white rounded-2xl shadow-sm p-4">
+              <h2 className="text-sm font-bold text-green-900 mb-2">Today's Recommendations</h2>
+              <div className="space-y-1.5">
+                {tips.slice(0, 3).map((tip, i) => (
+                  <div key={i} className="flex items-start gap-2.5 p-2.5 bg-gray-50 rounded-xl">
+                    <span className="text-sm flex-shrink-0">{tip.icon}</span>
+                    <p className={`text-xs ${tip.color}`}>{tip.text}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        );
+      })()}
 
       <ActivityInput
         todayMetric={health.todayMetric}
@@ -408,6 +485,7 @@ export default function FoodEnoughApp() {
         onEditSave={handleEditSave}
         onDelete={handleDelete}
         onExport={handleExport}
+        onMoveMeal={handleMoveMeal}
       />
 
       <BottomNav />

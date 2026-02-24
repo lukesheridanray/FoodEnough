@@ -23,6 +23,7 @@ interface Summary {
   ani_fat_goal?: number | null;
   ani_days_logged_7d?: number;
   ani_eligible?: boolean;
+  goal_type?: "lose" | "maintain" | "gain";
 }
 
 interface ImageItem {
@@ -213,6 +214,21 @@ export function useFoodLogs() {
     }
   };
 
+  const handleMoveMeal = async (logId: number, mealType: string) => {
+    try {
+      const res = await apiFetch(`/logs/${logId}/meal-type`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ meal_type: mealType }),
+      });
+      if (res.ok) {
+        loadLogs();
+      }
+    } catch (err) {
+      if (err instanceof UnauthorizedError) { handleUnauthorized(); return; }
+    }
+  };
+
   const handleQuickAdd = async (fav: Favorite) => {
     try {
       const tzOffset = getTzOffsetMinutes();
@@ -269,6 +285,7 @@ export function useFoodLogs() {
     handleExport,
     handleEditSave,
     handleDelete,
+    handleMoveMeal,
     handleQuickAdd,
     handleLogout,
     handleUnauthorized,
