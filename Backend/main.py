@@ -316,6 +316,15 @@ def _ensure_columns():
             with engine.begin() as conn:
                 conn.execute(sa_text("ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1"))
 
+    if "ani_recalibrations" in insp.get_table_names():
+        existing_ani = {c["name"] for c in insp.get_columns("ani_recalibrations")}
+        if "neat_estimate" not in existing_ani:
+            with engine.begin() as conn:
+                conn.execute(sa_text("ALTER TABLE ani_recalibrations ADD COLUMN neat_estimate REAL"))
+        if "reasoning" not in existing_ani:
+            with engine.begin() as conn:
+                conn.execute(sa_text("ALTER TABLE ani_recalibrations ADD COLUMN reasoning TEXT"))
+
     # Auto-promote seed admin on startup
     seed_admin_email = os.getenv("SEED_ADMIN_EMAIL", "").strip().lower()
     if seed_admin_email:
@@ -3232,17 +3241,22 @@ def get_today_summary(
     calories_remaining = (effective_calorie_goal - calories_today) if effective_calorie_goal is not None else None
 
     # Burn log data for today
-    today_burn_logs = (
-        db.query(BurnLog)
-        .filter(
-            BurnLog.user_id == current_user.id,
-            BurnLog.timestamp >= utc_start,
-            BurnLog.timestamp < utc_end,
+    active_calories_today = 0
+    burn_log_count_today = 0
+    try:
+        today_burn_logs = (
+            db.query(BurnLog)
+            .filter(
+                BurnLog.user_id == current_user.id,
+                BurnLog.timestamp >= utc_start,
+                BurnLog.timestamp < utc_end,
+            )
+            .all()
         )
-        .all()
-    )
-    active_calories_today = round(sum(bl.calories_burned for bl in today_burn_logs))
-    burn_log_count_today = len(today_burn_logs)
+        active_calories_today = round(sum(bl.calories_burned for bl in today_burn_logs))
+        burn_log_count_today = len(today_burn_logs)
+    except Exception:
+        db.rollback()
 
     return {
         "calories_today": round(calories_today),

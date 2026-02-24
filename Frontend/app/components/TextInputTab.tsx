@@ -169,7 +169,7 @@ export default function TextInputTab({ onLogged, onUnauthorized, onSwitchToBarco
                   <th className="text-right px-2 py-1.5 font-medium">kcal</th>
                   <th className="text-right px-2 py-1.5 font-medium text-blue-500">P</th>
                   <th className="text-right px-2 py-1.5 font-medium text-amber-500">C</th>
-                  <th className="text-right px-2 py-1.5 font-medium text-orange-500">F</th>
+                  <th className="text-right pl-2 pr-3 py-1.5 font-medium text-orange-500">F</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -179,7 +179,7 @@ export default function TextInputTab({ onLogged, onUnauthorized, onSwitchToBarco
                     <td className="text-right px-2 py-1.5">{item.calories}</td>
                     <td className="text-right px-2 py-1.5">{item.protein}g</td>
                     <td className="text-right px-2 py-1.5">{item.carbs}g</td>
-                    <td className="text-right px-2 py-1.5">{item.fat}g</td>
+                    <td className="text-right pl-2 pr-3 py-1.5">{item.fat}g</td>
                   </tr>
                 ))}
                 <tr className="bg-green-50 font-semibold text-green-800">
@@ -187,7 +187,7 @@ export default function TextInputTab({ onLogged, onUnauthorized, onSwitchToBarco
                   <td className="text-right px-2 py-1.5">{parsed.total.calories}</td>
                   <td className="text-right px-2 py-1.5">{parsed.total.protein}g</td>
                   <td className="text-right px-2 py-1.5">{parsed.total.carbs}g</td>
-                  <td className="text-right px-2 py-1.5">{parsed.total.fat}g</td>
+                  <td className="text-right pl-2 pr-3 py-1.5">{parsed.total.fat}g</td>
                 </tr>
               </tbody>
             </table>
