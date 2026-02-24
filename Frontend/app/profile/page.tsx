@@ -7,7 +7,7 @@ import BottomNav from "../components/BottomNav";
 import HealthSurvey from "../components/HealthSurvey";
 import WeightTracker from "../components/WeightTracker";
 import { useProfile } from "../hooks/useProfile";
-import { LogOut, BarChart3, User, ChevronRight, Clock, Trash2 } from "lucide-react";
+import { LogOut, BarChart3, User, ChevronRight, Clock, Trash2, Shield } from "lucide-react";
 import Link from "next/link";
 
 const COMMON_TIMEZONES = [
@@ -213,6 +213,25 @@ export default function ProfilePage() {
           <ChevronRight className="w-4 h-4 text-gray-300" />
         </Link>
       </section>
+
+      {/* Admin Dashboard link (admin only) */}
+      {p.profile?.is_admin && (
+        <section className="px-5 mt-3">
+          <Link
+            href="/admin"
+            className="flex items-center gap-3 bg-white rounded-2xl p-4 shadow-sm border border-gray-100 hover:border-purple-200 hover:shadow-md transition-all"
+          >
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-purple-700 flex items-center justify-center flex-shrink-0 shadow-sm">
+              <Shield className="w-5 h-5 text-white" />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-gray-900">Admin Dashboard</p>
+              <p className="text-xs text-gray-400">Manage users & invite codes</p>
+            </div>
+            <ChevronRight className="w-4 h-4 text-gray-300" />
+          </Link>
+        </section>
+      )}
 
       {/* Settings */}
       <section className="px-5 mt-5">

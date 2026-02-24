@@ -17,6 +17,7 @@ interface Profile {
   goal_type?: string | null;
   goal_weight_lbs?: number | null;
   is_premium?: boolean;
+  is_admin?: boolean;
 }
 
 interface WeightEntry {

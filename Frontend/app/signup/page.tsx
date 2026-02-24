@@ -7,6 +7,7 @@ import { API_URL } from "../../lib/config";
 import PasswordInput from "../components/PasswordInput";
 
 export default function SignupPage() {
+  const [inviteCode, setInviteCode] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -17,6 +18,10 @@ export default function SignupPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    if (!inviteCode.trim()) {
+      setError("Invite code is required");
+      return;
+    }
     if (password !== confirm) {
       setError("Passwords do not match");
       return;
@@ -30,7 +35,7 @@ export default function SignupPage() {
       const res = await fetch(`${API_URL}/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, invite_code: inviteCode.trim() }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -52,8 +57,21 @@ export default function SignupPage() {
       <div className="bg-white rounded-2xl shadow-md p-8 w-full max-w-sm">
         <h1 className="text-2xl font-bold text-green-900 mb-1">🌿 FoodEnough</h1>
         <p className="text-sm text-gray-600 mb-1">AI-powered food & fitness tracker</p>
-        <p className="text-sm text-gray-400 mb-6">Create your free account</p>
+        <p className="text-sm text-gray-400 mb-6">FoodEnough is currently in private beta. Enter your invite code to get started.</p>
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label htmlFor="signup-invite" className="text-sm text-gray-600 block mb-1">Invite Code</label>
+            <input
+              id="signup-invite"
+              type="text"
+              value={inviteCode}
+              onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+              required
+              autoComplete="off"
+              placeholder="e.g. ABCD1234"
+              className="w-full border border-green-300 rounded-xl px-3 py-2 text-sm tracking-wider font-mono uppercase focus:ring-2 focus:ring-green-500 focus:outline-none"
+            />
+          </div>
           <div>
             <label htmlFor="signup-email" className="text-sm text-gray-600 block mb-1">Email</label>
             <input

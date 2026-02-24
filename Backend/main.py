@@ -101,6 +101,8 @@ class User(Base):
     is_verified = Column(Integer, default=0)           # 0 = unverified, 1 = verified
     verification_token = Column(String, nullable=True)
     is_premium = Column(Integer, default=1)              # 0 = free, 1 = premium (default true for testing)
+    is_admin = Column(Integer, default=0)                  # 0 = regular user, 1 = admin
+    is_active = Column(Integer, default=1)                 # 0 = deactivated, 1 = active
     logs = relationship("FoodLog", back_populates="user")
     workouts = relationship("Workout", back_populates="user")
     weight_entries = relationship("WeightEntry", back_populates="user")
@@ -280,6 +282,18 @@ class BurnLog(Base):
     user = relationship("User", back_populates="burn_logs")
 
 
+class InviteCode(Base):
+    __tablename__ = "invite_codes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String, unique=True, index=True, nullable=False)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    used_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    used_at = Column(DateTime, nullable=True)
+    is_active = Column(Integer, default=1)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 Base.metadata.create_all(bind=engine)
 
 # ---- Lightweight column migrations (create_all won't add columns to existing tables) ----
@@ -292,6 +306,27 @@ def _ensure_columns():
         if "goal_weight_lbs" not in existing:
             with engine.begin() as conn:
                 conn.execute(sa_text("ALTER TABLE users ADD COLUMN goal_weight_lbs REAL"))
+        if "learned_neat" not in existing:
+            with engine.begin() as conn:
+                conn.execute(sa_text("ALTER TABLE users ADD COLUMN learned_neat REAL"))
+        if "is_admin" not in existing:
+            with engine.begin() as conn:
+                conn.execute(sa_text("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0"))
+        if "is_active" not in existing:
+            with engine.begin() as conn:
+                conn.execute(sa_text("ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1"))
+
+    # Auto-promote seed admin on startup
+    seed_admin_email = os.getenv("SEED_ADMIN_EMAIL", "").strip().lower()
+    if seed_admin_email:
+        _db = SessionLocal()
+        try:
+            seed_user = _db.query(User).filter(User.email == seed_admin_email).first()
+            if seed_user and not seed_user.is_admin:
+                seed_user.is_admin = 1
+                _db.commit()
+        finally:
+            _db.close()
 
 _ensure_columns()
 
@@ -1551,6 +1586,8 @@ def get_current_user(
     user = db.query(User).filter(User.id == user_db_id).first()
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Your account has been deactivated.")
     return user
 
 
@@ -1559,6 +1596,14 @@ def get_premium_user(
 ) -> User:
     if not current_user.is_premium:
         raise HTTPException(status_code=403, detail="Premium subscription required")
+    return current_user
+
+
+def get_admin_user(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
     return current_user
 
 
@@ -1606,6 +1651,15 @@ class FoodLogEdit(BaseModel):
 class RegisterInput(BaseModel):
     email: EmailStr
     password: str
+    invite_code: str = Field(min_length=1, max_length=20)
+
+    @field_validator("invite_code")
+    @classmethod
+    def invite_code_normalize(cls, v: str) -> str:
+        v = v.strip().upper()
+        if not v:
+            raise ValueError("Invite code is required")
+        return v
 
     @field_validator("password")
     @classmethod
@@ -1882,6 +1936,15 @@ class HealthMetricInput(BaseModel):
 @app.post("/auth/register")
 @limiter.limit("5/minute")
 def register(request: Request, data: RegisterInput, db: Session = Depends(get_db)):
+    # Validate invite code
+    invite = (
+        db.query(InviteCode)
+        .filter(InviteCode.code == data.invite_code, InviteCode.is_active == 1, InviteCode.used_by.is_(None))
+        .first()
+    )
+    if not invite:
+        raise HTTPException(status_code=400, detail="Invalid or expired invite code")
+
     email = data.email.lower().strip()
     if db.query(User).filter(User.email == email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -1896,6 +1959,11 @@ def register(request: Request, data: RegisterInput, db: Session = Depends(get_db
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    # Mark invite code as used
+    invite.used_by = user.id
+    invite.used_at = datetime.utcnow()
+    db.commit()
 
     # Send verification + admin emails in background thread (don't block signup)
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
@@ -1920,6 +1988,8 @@ def login(request: Request, data: LoginInput, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == email).first()
     if not user or not verify_password(data.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Your account has been deactivated.")
     token = create_access_token(user.id)
     return {"access_token": token, "token_type": "bearer", "is_verified": bool(user.is_verified)}
 
@@ -2812,6 +2882,7 @@ def get_profile(
         "goal_weight_lbs": current_user.goal_weight_lbs,
         "is_verified": bool(current_user.is_verified),
         "is_premium": bool(current_user.is_premium),
+        "is_admin": bool(current_user.is_admin),
     }
 
 
@@ -5049,3 +5120,120 @@ def analytics_compare_weeks(
         "week_a": get_week_stats(week_a_offset),
         "week_b": get_week_stats(week_b_offset),
     }
+
+
+# ============================================================
+# Admin Endpoints
+# ============================================================
+_INVITE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # excludes 0/O/1/I/L
+
+
+def _generate_invite_code(length: int = 8) -> str:
+    return "".join(_secrets.choice(_INVITE_CHARS) for _ in range(length))
+
+
+class GenerateCodesInput(BaseModel):
+    count: int = Field(ge=1, le=50, default=1)
+
+
+class UserStatusInput(BaseModel):
+    is_active: bool
+
+
+@app.get("/admin/users")
+@limiter.limit("30/minute")
+def admin_list_users(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_admin_user),
+):
+    users = db.query(User).order_by(User.id).all()
+    result = []
+    for u in users:
+        log_count = db.query(func.count(FoodLog.id)).filter(FoodLog.user_id == u.id).scalar() or 0
+        workout_count = db.query(func.count(Workout.id)).filter(Workout.user_id == u.id).scalar() or 0
+        weight_count = db.query(func.count(WeightEntry.id)).filter(WeightEntry.user_id == u.id).scalar() or 0
+        last_log = (
+            db.query(FoodLog.timestamp)
+            .filter(FoodLog.user_id == u.id)
+            .order_by(FoodLog.timestamp.desc())
+            .first()
+        )
+        result.append({
+            "id": u.id,
+            "email": u.email,
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+            "is_active": bool(u.is_active),
+            "is_admin": bool(u.is_admin),
+            "is_verified": bool(u.is_verified),
+            "log_count": log_count,
+            "workout_count": workout_count,
+            "weight_count": weight_count,
+            "last_active": last_log[0].isoformat() if last_log else None,
+        })
+    return {"users": result}
+
+
+@app.patch("/admin/users/{user_id}/status")
+@limiter.limit("30/minute")
+def admin_toggle_user_status(
+    request: Request,
+    user_id: int,
+    data: UserStatusInput,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_admin_user),
+):
+    if user_id == admin.id:
+        raise HTTPException(status_code=400, detail="Cannot change your own status")
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    target.is_active = 1 if data.is_active else 0
+    db.commit()
+    return {"id": target.id, "is_active": bool(target.is_active)}
+
+
+@app.post("/admin/invite-codes")
+@limiter.limit("30/minute")
+def admin_generate_codes(
+    request: Request,
+    data: GenerateCodesInput,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_admin_user),
+):
+    codes = []
+    for _ in range(data.count):
+        for _attempt in range(10):
+            code = _generate_invite_code()
+            if not db.query(InviteCode).filter(InviteCode.code == code).first():
+                break
+        invite = InviteCode(code=code, created_by=admin.id)
+        db.add(invite)
+        codes.append(code)
+    db.commit()
+    return {"codes": codes}
+
+
+@app.get("/admin/invite-codes")
+@limiter.limit("30/minute")
+def admin_list_codes(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_admin_user),
+):
+    invites = db.query(InviteCode).order_by(InviteCode.created_at.desc()).all()
+    result = []
+    for inv in invites:
+        used_email = None
+        if inv.used_by:
+            used_user = db.query(User).filter(User.id == inv.used_by).first()
+            used_email = used_user.email if used_user else None
+        result.append({
+            "id": inv.id,
+            "code": inv.code,
+            "is_active": bool(inv.is_active),
+            "used_by_email": used_email,
+            "used_at": inv.used_at.isoformat() if inv.used_at else None,
+            "created_at": inv.created_at.isoformat() if inv.created_at else None,
+        })
+    return {"invite_codes": result}
