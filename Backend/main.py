@@ -5,7 +5,7 @@
 # All food log endpoints are protected and scoped per user.
 # ============================================================
 
-from fastapi import FastAPI, Depends, HTTPException, Query, Request, File, UploadFile
+from fastapi import FastAPI, Depends, HTTPException, Query, Request, File, UploadFile, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -279,8 +279,7 @@ class BurnLog(Base):
     user = relationship("User", back_populates="burn_logs")
 
 
-if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
-    Base.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=engine)
 
 
 # ============================================================
@@ -2538,7 +2537,7 @@ _VALID_MEAL_TYPES = {"breakfast", "lunch", "snack", "dinner"}
 def update_log_meal_type(
     request: Request,
     log_id: int,
-    body: dict,
+    body: dict = Body(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
