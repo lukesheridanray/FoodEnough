@@ -124,15 +124,6 @@ function getSignalDisplay(signal: WeightTrendSignal): SignalDisplay {
         borderColor: "border-amber-200",
         textColor: "text-amber-800",
       };
-    case "noisy_fallback":
-      return {
-        icon: <Info className="w-6 h-6 text-blue-500" />,
-        message: "This week\u2019s data was noisy \u2014 ANI used your 30-day trend",
-        gradientFrom: "from-blue-50",
-        gradientTo: "to-sky-50",
-        borderColor: "border-blue-200",
-        textColor: "text-blue-800",
-      };
     case "no_data":
     default:
       return {
@@ -149,6 +140,9 @@ function getSignalDisplay(signal: WeightTrendSignal): SignalDisplay {
 function signalUsedLabel(signal: ANITargets["signal_used"]): string | null {
   if (signal === "weight_7d") return "7-day";
   if (signal === "weight_30d") return "30-day";
+  if (signal === "weight_60d") return "60-day";
+  if (signal === "weight_90d") return "90-day";
+  if (signal === "multi_window") return "Blended";
   return null;
 }
 
@@ -240,9 +234,35 @@ export default function ANIDashboard({ targets, history, insights, recalibrating
               {targets.weight_delta != null && targets.weight_delta !== 0 && (
                 <p className="text-sm font-semibold text-gray-800 mt-2">
                   {targets.weight_delta > 0 ? "+" : ""}
-                  {targets.weight_delta.toFixed(1)} lbs
-                  {targets.signal_used === "weight_30d" ? "/week (30-day trend)" : " this week"}
+                  {targets.weight_delta.toFixed(1)} lbs/week
+                  {targets.signal_used === "multi_window" ? " (blended)" :
+                   targets.signal_used === "weight_30d" ? " (30-day)" :
+                   targets.signal_used === "weight_60d" ? " (60-day)" :
+                   targets.signal_used === "weight_90d" ? " (90-day)" :
+                   targets.signal_used === "weight_7d" ? " (7-day)" : ""}
                 </p>
+              )}
+              {/* Per-window breakdown */}
+              {targets.trend_windows && targets.windows_used && targets.windows_used.length > 1 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {(["7d", "30d", "60d", "90d"] as const).map((key) => {
+                    const w = targets.trend_windows?.[key];
+                    if (!w) return null;
+                    const used = targets.windows_used?.includes(key);
+                    return (
+                      <span
+                        key={key}
+                        className={`text-[10px] px-1.5 py-0.5 rounded-md ${
+                          used ? "bg-amber-100 text-amber-700 font-semibold" : "bg-gray-100 text-gray-400 line-through"
+                        }`}
+                      >
+                        {key}: {w.delta > 0 ? "+" : ""}{w.delta.toFixed(1)}
+                        {w.noisy ? " ~" : ""}
+                        {used ? ` (${Math.round(w.weight * 100)}%)` : ""}
+                      </span>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </div>
@@ -501,7 +521,14 @@ export default function ANIDashboard({ targets, history, insights, recalibrating
                     </div>
                     {recal.analysis?.signal_used && (
                       <p className="text-[10px] text-gray-400 mt-1">
-                        Signal: {recal.analysis.signal_used === "weight_7d" ? "7-day weight" : recal.analysis.signal_used === "weight_30d" ? "30-day weight" : "calories only"}
+                        Signal: {
+                          recal.analysis.signal_used === "weight_7d" ? "7-day weight" :
+                          recal.analysis.signal_used === "weight_30d" ? "30-day weight" :
+                          recal.analysis.signal_used === "weight_60d" ? "60-day weight" :
+                          recal.analysis.signal_used === "weight_90d" ? "90-day weight" :
+                          recal.analysis.signal_used === "multi_window" ? "blended weight" :
+                          "calories only"
+                        }
                         {recal.analysis.weight_delta != null && ` | \u0394 ${recal.analysis.weight_delta > 0 ? "+" : ""}${recal.analysis.weight_delta.toFixed(1)} lbs`}
                       </p>
                     )}

@@ -818,6 +818,33 @@ def _burn_log_to_dict(bl: "BurnLog") -> dict:
 
 
 # ============================================================
+# Weight Trend Window Helper
+# ============================================================
+def _compute_window_delta(entries: list, min_entries: int = 2, check_noise: bool = False) -> dict | None:
+    """Compute weight delta (lbs/week) for a list of weight entries.
+    Returns None if insufficient data, otherwise a dict with delta_per_week, is_noisy, days_span, n_entries."""
+    import statistics as _stats
+    if not entries or len(entries) < min_entries:
+        return None
+    sorted_w = sorted(entries, key=lambda w: w.timestamp)
+    days_span = max((sorted_w[-1].timestamp - sorted_w[0].timestamp).days, 1)
+    raw_delta = sorted_w[-1].weight_lbs - sorted_w[0].weight_lbs
+    delta_per_week = raw_delta * 7.0 / days_span
+
+    is_noisy = False
+    if check_noise and len(sorted_w) >= 2:
+        weight_values = [w.weight_lbs for w in sorted_w]
+        is_noisy = _stats.stdev(weight_values) > 2.0
+
+    return {
+        "delta_per_week": delta_per_week,
+        "is_noisy": is_noisy,
+        "days_span": days_span,
+        "n_entries": len(sorted_w),
+    }
+
+
+# ============================================================
 # ANI Recalibration Engine (pure math, no AI API)
 # ============================================================
 def run_recalibration(
@@ -828,6 +855,8 @@ def run_recalibration(
     current_goals: dict,
     health_metrics: list = None,
     weight_entries_30d: list = None,
+    weight_entries_60d: list = None,
+    weight_entries_90d: list = None,
     db=None,
 ) -> dict:
     """
@@ -887,50 +916,68 @@ def run_recalibration(
 
     # ==================================================================
     # SIGNAL 1 — Weight Trend (PRIMARY, highest authority)
+    # Four-window weighted blend: 7d(15%), 30d(50%), 60d(25%), 90d(10%)
     # ==================================================================
     weight_delta = None
     weight_trend_signal = "no_data"
     signal_used = "calories_only"
-    is_noisy_week = False
 
-    if len(weight_entries) >= 2:
-        sorted_weights = sorted(weight_entries, key=lambda w: w.timestamp)
-        weight_values = [w.weight_lbs for w in sorted_weights]
-        weight_delta = sorted_weights[-1].weight_lbs - sorted_weights[0].weight_lbs
+    # Compute each window
+    w7  = _compute_window_delta(weight_entries,      min_entries=2, check_noise=True)
+    w30 = _compute_window_delta(weight_entries_30d,  min_entries=3)
+    w60 = _compute_window_delta(weight_entries_60d,  min_entries=4)
+    w90 = _compute_window_delta(weight_entries_90d,  min_entries=5)
 
-        # Noisy data detection: std dev > 2.0 lbs or < 2 entries
-        if len(weight_values) >= 2:
-            weight_std = statistics.stdev(weight_values)
-            is_noisy_week = weight_std > 2.0
+    # Build window data for weighted blend
+    _window_config = [
+        ("7d",  w7,  0.15),
+        ("30d", w30, 0.50),
+        ("60d", w60, 0.25),
+        ("90d", w90, 0.10),
+    ]
+    # Exclude unavailable windows and noisy 7d
+    active_windows = []
+    for label, result, base_weight in _window_config:
+        if result is None:
+            continue
+        if label == "7d" and result["is_noisy"]:
+            continue
+        active_windows.append((label, result, base_weight))
+
+    # Build trend_windows analysis dict
+    trend_windows = {}
+    for label, result, base_weight in _window_config:
+        if result is not None:
+            entry = {
+                "delta": round(result["delta_per_week"], 2),
+                "weight": base_weight,
+                "entries": result["n_entries"],
+            }
+            if label == "7d":
+                entry["noisy"] = result["is_noisy"]
+            trend_windows[label] = entry
         else:
-            is_noisy_week = True
+            trend_windows[label] = None
 
-        if not is_noisy_week:
-            signal_used = "weight_7d"
-        else:
-            # Fall back to 30-day trend if weekly data is noisy
-            if weight_entries_30d and len(weight_entries_30d) >= 2:
-                sorted_30d = sorted(weight_entries_30d, key=lambda w: w.timestamp)
-                weight_delta = sorted_30d[-1].weight_lbs - sorted_30d[0].weight_lbs
-                # Normalise 30-day delta to a per-week rate for consistent thresholds
-                days_span = max((sorted_30d[-1].timestamp - sorted_30d[0].timestamp).days, 1)
-                weight_delta = weight_delta * 7.0 / days_span
-                signal_used = "weight_30d"
-                weight_trend_signal = "noisy_fallback"
-            else:
-                signal_used = "calories_only"
-                weight_delta = None
-    elif weight_entries_30d and len(weight_entries_30d) >= 2:
-        # Fewer than 2 weekly entries — try 30-day fallback
-        sorted_30d = sorted(weight_entries_30d, key=lambda w: w.timestamp)
-        weight_delta = sorted_30d[-1].weight_lbs - sorted_30d[0].weight_lbs
-        days_span = max((sorted_30d[-1].timestamp - sorted_30d[0].timestamp).days, 1)
-        weight_delta = weight_delta * 7.0 / days_span
-        signal_used = "weight_30d"
-        weight_trend_signal = "noisy_fallback"
+    windows_used = [label for label, _, _ in active_windows]
 
-    # Classify the weight trend signal (if we have usable weight data)
-    if weight_delta is not None and weight_trend_signal != "noisy_fallback":
+    if active_windows:
+        # Redistribute weights proportionally across active windows
+        total_raw_weight = sum(bw for _, _, bw in active_windows)
+        weight_delta = sum(
+            r["delta_per_week"] * (bw / total_raw_weight)
+            for _, r, bw in active_windows
+        )
+
+        # Determine signal_used
+        if len(active_windows) >= 2:
+            signal_used = "multi_window"
+        elif len(active_windows) == 1:
+            signal_used = f"weight_{active_windows[0][0]}"
+        # signal_used is already set for single windows like "weight_7d", "weight_30d"
+
+    # Classify the weight trend signal
+    if weight_delta is not None:
         if goal_type == "lose":
             if -2 <= weight_delta <= -0.5:
                 weight_trend_signal = "on_track"
@@ -958,7 +1005,7 @@ def run_recalibration(
                 weight_trend_signal = "too_slow"  # gaining when should maintain
             else:
                 weight_trend_signal = "on_track"  # within acceptable range
-    elif weight_delta is None:
+    else:
         weight_trend_signal = "no_data"
 
     # ==================================================================
@@ -1048,7 +1095,7 @@ def run_recalibration(
         weight_delta is not None
         and avg_cal > 0
         and days_logged >= 5
-        and signal_used in ("weight_7d", "weight_30d")
+        and signal_used in ("weight_7d", "weight_30d", "multi_window")
     ):
         # actual_weight_delta_per_day in lbs (weight_delta is already per-week)
         actual_delta_per_day = weight_delta / 7.0
@@ -1200,29 +1247,6 @@ def run_recalibration(
                         f"Weight went up {round(weight_delta, 1)} lbs while in a cut. This is likely water fluctuation or "
                         f"timing — your logged intake looks close to target. Holding steady and watching next week."
                     )
-            elif weight_trend_signal == "noisy_fallback":
-                reasoning_parts.append(
-                    f"This week's weight data was a bit variable, so ANI used your 30-day trend instead "
-                    f"(~{abs(round(weight_delta, 1))} lbs/week). "
-                )
-                if weight_delta < -2:
-                    new_cal *= 1.05
-                    reasoning_parts.append(
-                        "Your longer-term trend shows faster loss than ideal. Raising calories 5% to keep things sustainable."
-                    )
-                elif -2 <= weight_delta <= -0.5:
-                    reasoning_parts.append(
-                        "The longer-term trend looks solid — you're losing at a healthy pace. Keeping targets steady."
-                    )
-                elif weight_delta > 0:
-                    new_cal *= 0.97
-                    reasoning_parts.append(
-                        "The 30-day trend suggests weight is drifting up. Trimming calories 3% to get back on track."
-                    )
-                else:
-                    reasoning_parts.append(
-                        "Loss is a bit slower than ideal over the longer term. Holding targets for now and watching closely."
-                    )
 
         elif goal_type == "gain":
             if weight_trend_signal == "on_track":
@@ -1261,25 +1285,6 @@ def run_recalibration(
                     f"Weight dropped {abs(round(weight_delta, 1))} lbs while trying to gain. "
                     f"ANI is raising calories 7% to get you back into surplus. Let's get that trend moving upward."
                 )
-            elif weight_trend_signal == "noisy_fallback":
-                reasoning_parts.append(
-                    f"This week's weight data was variable, so ANI used your 30-day trend "
-                    f"(~{round(weight_delta, 1)} lbs/week). "
-                )
-                if weight_delta < 0.25:
-                    new_cal *= 1.05
-                    reasoning_parts.append(
-                        "The longer-term trend suggests you need a bit more fuel. Bumping calories 5%."
-                    )
-                elif 0.25 <= weight_delta <= 1.0:
-                    reasoning_parts.append(
-                        "Your 30-day gain rate looks healthy. Holding targets steady."
-                    )
-                elif weight_delta > 1.0:
-                    new_cal *= 0.97
-                    reasoning_parts.append(
-                        "Longer-term trend shows faster gains than ideal. Trimming calories 3% to keep it lean."
-                    )
 
         else:  # maintain
             if weight_trend_signal == "on_track":
@@ -1307,19 +1312,6 @@ def run_recalibration(
                     f"You gained {round(weight_delta, 1)} lbs while maintaining — reducing calories 5% to stabilize. "
                     f"Small adjustment to get your weight back to steady."
                 )
-            elif weight_trend_signal == "noisy_fallback":
-                reasoning_parts.append(
-                    f"This week's weight data was variable, so ANI used your 30-day trend "
-                    f"(~{round(weight_delta, 1)} lbs/week change). "
-                )
-                if abs(weight_delta) < 0.5:
-                    reasoning_parts.append("Longer-term trend shows stable weight. All good!")
-                elif weight_delta < -1:
-                    new_cal *= 1.07
-                    reasoning_parts.append("30-day trend shows a downward drift. Raising calories 7% to stabilize.")
-                elif weight_delta > 1:
-                    new_cal *= 0.95
-                    reasoning_parts.append("30-day trend shows an upward drift. Reducing calories 5% to stabilize.")
     else:
         # No weight data at all
         reasoning_parts.append(
@@ -1489,6 +1481,8 @@ def run_recalibration(
         "weight_trend_signal": weight_trend_signal,
         "energy_balance_agrees": energy_balance_agrees,
         "signal_used": signal_used,
+        "trend_windows": trend_windows,
+        "windows_used": windows_used,
     }
 
     return {
@@ -3848,14 +3842,20 @@ def ani_recalibrate(
         .all()
     )
 
-    # 30-day weight data for noisy-week fallback
+    # Multi-window weight data (30d, 60d, 90d)
     weight_entries_30d = (
         db.query(WeightEntry)
-        .filter(
-            WeightEntry.user_id == current_user.id,
-            WeightEntry.timestamp >= now - timedelta(days=30),
-            WeightEntry.timestamp < period_end,
-        )
+        .filter(WeightEntry.user_id == current_user.id, WeightEntry.timestamp >= now - timedelta(days=30), WeightEntry.timestamp < period_end)
+        .all()
+    )
+    weight_entries_60d = (
+        db.query(WeightEntry)
+        .filter(WeightEntry.user_id == current_user.id, WeightEntry.timestamp >= now - timedelta(days=60), WeightEntry.timestamp < period_end)
+        .all()
+    )
+    weight_entries_90d = (
+        db.query(WeightEntry)
+        .filter(WeightEntry.user_id == current_user.id, WeightEntry.timestamp >= now - timedelta(days=90), WeightEntry.timestamp < period_end)
         .all()
     )
 
@@ -3895,6 +3895,8 @@ def ani_recalibrate(
         current_user, food_logs, weight_entries, plan_sessions, current_goals,
         health_metrics=health_metrics,
         weight_entries_30d=weight_entries_30d,
+        weight_entries_60d=weight_entries_60d,
+        weight_entries_90d=weight_entries_90d,
         db=db,
     )
 
@@ -4329,16 +4331,16 @@ def ani_auto_recalibrate(
                 .all()
             )
 
-            # 30-day weight data for noisy-week fallback
-            weight_entries_30d = (
-                db.query(WeightEntry)
-                .filter(
-                    WeightEntry.user_id == user.id,
-                    WeightEntry.timestamp >= now - timedelta(days=30),
-                    WeightEntry.timestamp < period_end,
-                )
-                .all()
-            )
+            # Multi-window weight data (30d, 60d, 90d)
+            weight_entries_30d = db.query(WeightEntry).filter(
+                WeightEntry.user_id == user.id, WeightEntry.timestamp >= now - timedelta(days=30), WeightEntry.timestamp < period_end,
+            ).all()
+            weight_entries_60d = db.query(WeightEntry).filter(
+                WeightEntry.user_id == user.id, WeightEntry.timestamp >= now - timedelta(days=60), WeightEntry.timestamp < period_end,
+            ).all()
+            weight_entries_90d = db.query(WeightEntry).filter(
+                WeightEntry.user_id == user.id, WeightEntry.timestamp >= now - timedelta(days=90), WeightEntry.timestamp < period_end,
+            ).all()
 
             plan_sessions = []
             active_plan = (
@@ -4367,6 +4369,8 @@ def ani_auto_recalibrate(
                 user, food_logs, weight_entries, plan_sessions, current_goals,
                 health_metrics=health_metrics,
                 weight_entries_30d=weight_entries_30d,
+                weight_entries_60d=weight_entries_60d,
+                weight_entries_90d=weight_entries_90d,
                 db=db,
             )
 

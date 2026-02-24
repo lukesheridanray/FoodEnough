@@ -15,14 +15,21 @@ interface ANITargets {
   last_recalibrated?: string;
   // Three-signal data
   neat_estimate?: number | null;
-  weight_trend_signal?: "on_track" | "too_fast" | "too_slow" | "wrong_direction" | "noisy_fallback" | "no_data" | null;
+  weight_trend_signal?: "on_track" | "too_fast" | "too_slow" | "wrong_direction" | "no_data" | null;
   weight_delta?: number | null;
   calories_out?: number | null;
   net_balance?: number | null;
   energy_balance_agrees?: boolean | null;
-  signal_used?: "weight_7d" | "weight_30d" | "calories_only" | null;
+  signal_used?: "weight_7d" | "weight_30d" | "weight_60d" | "weight_90d" | "multi_window" | "calories_only" | null;
   avg_calories?: number | null;
   avg_expenditure?: number | null;
+  trend_windows?: {
+    "7d": { delta: number; weight: number; entries: number; noisy?: boolean } | null;
+    "30d": { delta: number; weight: number; entries: number; noisy?: boolean } | null;
+    "60d": { delta: number; weight: number; entries: number; noisy?: boolean } | null;
+    "90d": { delta: number; weight: number; entries: number; noisy?: boolean } | null;
+  } | null;
+  windows_used?: string[] | null;
 }
 
 interface RecalibrationGoals {
